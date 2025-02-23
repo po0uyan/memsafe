@@ -7,7 +7,7 @@ authors = ["po0uyan <info@pouyan.me>", " mshojaei179@gmail.com"]  # Replace with
 license = "MIT"
 repository = "https://github.com/pouyan/memsafe"
 keywords = ["memory", "security", "lock", "cross-platform"]
-categories = ["memory-management", "security"]
+categories = ["memory-management","os", "cryptography"]
 
 [dependencies]
 libc = { version = "0.2.170", optional = true }
