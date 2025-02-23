@@ -1,11 +1,11 @@
 [package]
 name = "memsafe"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2021"
 description = "A cross-platform Rust library for securely wrapping data in memory"
-authors = ["po0uyan <info@pouyan.me>", "mortezashojaei mshojaei179@gmail.com"]  # Replace with your actual email
+authors = ["po0uyan <info@pouyan.me>", "mortezashojaei mshojaei179@gmail.com"]
 license = "MIT"
-repository = "https://github.com/pouyan/memsafe"
+repository = "https://github.com/po0uyan/memsafe"
 keywords = ["memory", "security", "lock", "cross-platform"]
 categories = ["memory-management","os", "cryptography"]
 
