@@ -1,0 +1,34 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build-and-test:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        features: ["unix", "windows"]
+        exclude:
+          - os: windows-latest
+            features: unix
+          - os: ubuntu-latest
+            features: windows
+          - os: macos-latest
+            features: windows
+
+    steps:
+      - uses: actions/checkout@v3
+      - name: Install Rust
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          override: true
+      - name: Build
+        run: cargo build --verbose --no-default-features --features ${{ matrix.features }}
+      - name: Test
+        run: cargo test --verbose --no-default-features --features ${{ matrix.features }}
