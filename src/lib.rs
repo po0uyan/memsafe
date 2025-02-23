@@ -46,16 +46,16 @@ impl<T> MemSafe<T> {
             if ptr == libc::MAP_FAILED {
                 return Err(MemoryError(io::Error::last_os_error()));
             }
-            let mut memsafe = MemSafe {
+            let mem_safe = MemSafe {
                 ptr: ptr as *mut T,
                 len: size,
                 is_writable: UnsafeCell::new(true),
             };
-            unsafe { ptr::write(memsafe.ptr, value); }
-            memsafe.lock_memory()?;
-            memsafe.set_memory_advice()?;
-            memsafe.make_noaccess()?;
-            Ok(memsafe)
+            unsafe { ptr::write(mem_safe.ptr, value); }
+            mem_safe.lock_memory()?;
+            mem_safe.set_memory_advice()?;
+            mem_safe.make_noaccess()?;
+            Ok(mem_safe)
         }
 
         #[cfg(windows)]
