@@ -22,7 +22,6 @@ impl From<io::Error> for MemoryError {
 }
 
 impl MemoryError {
-    // Add a method to access the inner error, silencing the dead_code warning
     pub fn inner(&self) -> &io::Error {
         &self.0
     }
@@ -75,18 +74,18 @@ impl<T> MemSafe<T> {
                     PAGE_READWRITE,
                 )
             };
-            if ptr.is_null() {
+            if ptr == libc::MAP_FAILED {
                 return Err(MemoryError(io::Error::last_os_error()));
             }
-            let mut memsafe = MemSafe {
+            let mem_safe = MemSafe {
                 ptr: ptr as *mut T,
                 len: size,
                 is_writable: UnsafeCell::new(true),
             };
-            unsafe { ptr::write(memsafe.ptr, value); }
-            memsafe.lock_memory()?;
-            memsafe.make_noaccess()?;
-            Ok(memsafe)
+            unsafe { ptr::write(mem_safe.ptr, value); }
+            mem_safe.lock_memory()?;
+            mem_safe.make_noaccess()?;
+            Ok(mem_safe)
         }
     }
 
@@ -190,13 +189,11 @@ impl<T> MemSafe<T> {
 impl<T> Deref for MemSafe<T> {
     type Target = T;
     fn deref(&self) -> &Self::Target {
-        if !unsafe { *self.is_writable.get() } {
-            self.make_readonly().expect("Failed to make readable");
-            let result = unsafe { &*self.ptr };
-            self.make_noaccess().expect("Failed to make noaccess");
-            result
-        } else {
-            unsafe { &*self.ptr }
+        unsafe {
+            if !*self.is_writable.get() {
+                self.make_readonly().expect("Failed to make readable");
+            }
+            &*self.ptr
         }
     }
 }
@@ -204,11 +201,7 @@ impl<T> Deref for MemSafe<T> {
 impl<T> DerefMut for MemSafe<T> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         self.make_writable().expect("Failed to make writable");
-        unsafe {
-            let result = &mut *self.ptr;
-            self.make_noaccess().expect("Failed to make noaccess");
-            result
-        }
+        unsafe { &mut *self.ptr }
     }
 }
 
@@ -239,7 +232,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_memsafe_string() {
+    fn test_mem_safe_string() {
         let mut secret = MemSafe::new(String::from("secret")).unwrap();
         assert_eq!(*secret, "secret");
         secret.push_str(" data");
