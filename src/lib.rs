@@ -21,10 +21,17 @@ impl From<io::Error> for MemoryError {
     }
 }
 
+impl MemoryError {
+    // Add a method to access the inner error, silencing the dead_code warning
+    pub fn inner(&self) -> &io::Error {
+        &self.0
+    }
+}
+
 pub struct MemSafe<T> {
     ptr: *mut T,
     len: usize,
-    is_writable: UnsafeCell<bool>, // Wrap is_writable in UnsafeCell for interior mutability
+    is_writable: UnsafeCell<bool>,
 }
 
 impl<T> MemSafe<T> {
@@ -89,7 +96,7 @@ impl<T> MemSafe<T> {
             if libc::mprotect(self.ptr as *mut c_void, self.len, libc::PROT_NONE) != 0 {
                 return Err(MemoryError(io::Error::last_os_error()));
             }
-            *self.is_writable.get() = false; // Safe mutation via UnsafeCell
+            *self.is_writable.get() = false;
             Ok(())
         }
 
