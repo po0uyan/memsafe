@@ -1,6 +1,6 @@
 [package]
 name = "memsafe"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 description = "A cross-platform Rust library for securely wrapping data in memory"
 authors = ["po0uyan <info@pouyan.me>", "mortezashojaei mshojaei179@gmail.com"]  # Replace with your actual email
@@ -10,7 +10,7 @@ keywords = ["memory", "security", "lock", "cross-platform"]
 categories = ["memory-management","os", "cryptography"]
 
 [dependencies]
-libc = { version = "0.2.170", optional = true }
+libc = { version = "0.2", optional = true }
 winapi = { version = "0.3", features = ["memoryapi", "winnt"], optional = true }
 
 [features]
