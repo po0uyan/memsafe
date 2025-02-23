@@ -9,7 +9,7 @@ use libc::{self, c_void};
 #[cfg(windows)]
 use winapi::um::{
     memoryapi::{VirtualAlloc, VirtualFree, VirtualLock, VirtualProtect, VirtualUnlock},
-    winnt::{MEM_COMMIT, MEM_RESERVE, PAGE_NOACCESS, PAGE_READONLY, PAGE_READWRITE},
+    winnt::{MEM_COMMIT, MEM_RESERVE, PAGE_NOACCESS, PAGE_READONLY, PAGE_READWRITE, MEM_RELEASE}, // Added MEM_RELEASE
 };
 
 #[derive(Debug)]
@@ -74,7 +74,7 @@ impl<T> MemSafe<T> {
                     PAGE_READWRITE,
                 )
             };
-            if ptr == libc::MAP_FAILED {
+            if ptr.is_null() {  // Fixed: Use is_null() instead of MAP_FAILED
                 return Err(MemoryError(io::Error::last_os_error()));
             }
             let mem_safe = MemSafe {
@@ -222,7 +222,7 @@ impl<T> Drop for MemSafe<T> {
             ptr::drop_in_place(self.ptr);
             ptr::write_bytes(self.ptr as *mut u8, 0, self.len);
             VirtualUnlock(self.ptr as *mut _, self.len);
-            VirtualFree(self.ptr as *mut _, 0, MEM_RELEASE);
+            VirtualFree(self.ptr as *mut _, 0, MEM_RELEASE);  // Now in scope
         }
     }
 }
