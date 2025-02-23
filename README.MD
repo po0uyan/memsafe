@@ -5,6 +5,7 @@ A cross-platform Rust library for securely wrapping data in memory.
 [![Crates.io](https://img.shields.io/crates/v/memsafe.svg)](https://crates.io/crates/memsafe)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
+`memsafe` locks sensitive data in memory, restricts access, and ensures secure cleanup—built from the ground up with simplicity and security in mind. This is the official `memsafe` repository, hosted at [https://github.com/po0uyan/memsafe](https://github.com/po0uyan/memsafe), and published on crates.io at [https://crates.io/crates/memsafe](https://crates.io/crates/memsafe).
 
 `memsafe` locks sensitive data in memory, restricts access, and ensures secure cleanup—built from the ground up with simplicity and security in mind.
 
