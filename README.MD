@@ -1,5 +1,5 @@
 # memsafe
-One of the most secure cross-platform Rust library for securely wrapping data in memory.
+One of the most secure cross-platform Rust libraries for securely wrapping data in memory.
 
 [![Crates.io](https://img.shields.io/crates/v/memsafe.svg)](https://crates.io/crates/memsafe)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
