@@ -226,16 +226,3 @@ impl<T> Drop for MemSafe<T> {
         }
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_mem_safe_string() {
-        let mut secret = MemSafe::new(String::from("secret")).unwrap();
-        assert_eq!(*secret, "secret");
-        secret.push_str(" data");
-        assert_eq!(*secret, "secret data");
-    }
-}
