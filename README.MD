@@ -4,7 +4,7 @@ A cross-platform Rust library for securely wrapping data in memory.
 [![Crates.io](https://img.shields.io/crates/v/memsafe.svg)](https://crates.io/crates/memsafe)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-This is the official `memsafe` repository, hosted at [https://github.com/po0uyan/memsafe](https://github.com/po0uyan/memsafe), and published on crates.io at [https://crates.io/crates/memsafe](https://crates.io/crates/memsafe).
+This is the official `memsafe` crate, hosted at [GitHub](https://github.com/po0uyan/memsafe), and published on crates.io at [here](https://crates.io/crates/memsafe).
 
 `memsafe` locks sensitive data in memory, restricts access, and ensures secure cleanup—built from the ground up with simplicity and security in mind.
 
@@ -35,15 +35,13 @@ memsafe = { version = "0.1.4", default-features = false, features = ["windows"] 
 ```
 
 ## Milestones
-The journey to create `memsafe` involved several key steps:
-1. **Secure Memory Wrapper**: Developed a Rust struct (`MemSafe`) using `mprotect`, `mlock`, and `madvise` on Unix, and `VirtualProtect`, `VirtualLock` on Windows, ensuring data stays locked and inaccessible by default.
-2. **Naming the Crate**: Brainstormed names like `MemVault`, `LockMem`, and settled on `memsafe` for its simplicity and clarity.
-3. **Cross-Platform Support**: Made `libc` and `winapi` optional dependencies with `unix` and `windows` features, defaulting to Unix for broad compatibility.
-4. **Licensing**: Chose the MIT License to require attribution (`Copyright (c) 2025 Pouyan`) while keeping it permissive.
-5. **SSH Configuration**: Set up an SSH config using `pouyan.key` for GitHub (`github.com/po0uyan/memsafe`), with a catch-all for other connections.
-6. **Publishing**: Created the crate, initialized a Git repo, and published to crates.io with a streamlined workflow.
-
-See the full story in the [GitHub repository](https://github.com/po0uyan/memsafe).
+1. **Secure Memory Wrapper Implementation:** Engineered the MemSafe struct to encapsulate sensitive data, leveraging mprotect, mlock, and madvise on Unix-like systems (Linux and macOS), and VirtualProtect and VirtualLock on Windows. This ensures memory is locked in RAM, excluded from core dumps where possible, and defaults to an inaccessible state for maximum security.
+2. **Controlled Access Interface:** Introduced write and read methods utilizing closure-based APIs to enforce strict access controls. These methods temporarily adjust memory permissions for writing or reading, immediately reverting to an inaccessible state (PROT_NONE/PAGE_NOACCESS) post-operation, preventing unauthorized reads after writes.
+3. **Crate Naming and Branding:** Explored naming options such as MemVault, LockMem, and SafeBox, ultimately selecting memsafe for its concise, intuitive representation of the crate’s purpose—safe memory handling with broad appeal.
+4. **Cross-Platform Compatibility:** Structured the crate with optional dependencies (libc for Unix, winapi for Windows) via unix and windows feature flags, defaulting to unix for seamless compatibility across common development environments while ensuring Windows support.
+5. **Open-Source Licensing:** Adopted the MIT License (Copyright (c) 2025 Pouyan) to balance permissiveness with attribution, fostering adoption while acknowledging authorship.
+6. **Publication and Distribution:** Established the crate with a streamlined workflow, initialized a Git repository (rust-memsafe), and published to crates.io, accompanied by CI/CD processes to validate functionality across platforms.
+   See the full story in the [GitHub repository](https://github.com/po0uyan/memsafe).
 
 ## Repository
 - **Source**: [https://github.com/po0uyan/memsafe](https://github.com/po0uyan/memsafe)
