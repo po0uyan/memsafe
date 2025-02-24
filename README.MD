@@ -6,6 +6,7 @@ One of the most secure cross-platform Rust libraries for securely wrapping data 
 
 This is the official `memsafe` crate, hosted at [GitHub](https://github.com/po0uyan/memsafe), and published on [crates.io](https://crates.io/crates/memsafe).
 
+
 **`memsafe`** locks sensitive data in memory, restricts access, and ensures secure cleanup—built from the ground up with simplicity and security in mind.
 
 ## Usage
@@ -27,12 +28,14 @@ Add to your `Cargo.toml`:
 ```toml
 [dependencies]
 memsafe = "0.1.7"
+
 ```
 
 For Windows support only:
 ```toml
 [dependencies]
 memsafe = { version = "0.1.7", default-features = false, features = ["windows"] }
+
 ```
 ## Security Mechanisms: A Deep Dive for Technical Enthusiasts
 
@@ -68,6 +71,7 @@ To further harden `memsafe` against vulnerabilities, the following technical imp
 - **Custom Allocator**: Develop a randomized allocator with integrity checks to obscure memory locations.
 - **Side-Channel Mitigation**: Optimize for constant-time operations to resist timing and speculative execution attacks.
   See the full Milestone in the [Milestones](https://github.com/po0uyan/memsafe/milestones).
+
 
 ## Repository
 - **Source**: [https://github.com/po0uyan/memsafe](https://github.com/po0uyan/memsafe)
