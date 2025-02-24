@@ -26,13 +26,13 @@ println!("Secure data: {}", secret);
 Add to your `Cargo.toml`:
 ```toml
 [dependencies]
-memsafe = "0.1.0"
+memsafe = "0.1.4"
 ```
 
 For Windows support only:
 ```toml
 [dependencies]
-memsafe = { version = "0.1.0", default-features = false, features = ["windows"] }
+memsafe = { version = "0.1.4", default-features = false, features = ["windows"] }
 ```
 
 ## Milestones
@@ -55,5 +55,6 @@ Licensed under the MIT License. See [LICENSE](LICENSE) for details.
 ## Contributing
 Issues and pull requests are welcome at [https://github.com/po0uyan/memsafe](https://github.com/po0uyan/memsafe).
 I'll be more than happy to merge enhancements! security updates and any steps towards making software world a better place for everyone.
----
+
+
 
