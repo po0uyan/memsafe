@@ -1,4 +1,3 @@
-
 # memsafe
 A cross-platform Rust library for securely wrapping data in memory.
 
@@ -48,6 +47,9 @@ See the full story in the [GitHub repository](https://github.com/po0uyan/memsafe
 
 ## Repository
 - **Source**: [https://github.com/po0uyan/memsafe](https://github.com/po0uyan/memsafe)
+
+## Security Notice
+Please note that while `memsafe` is designed with security best practices in mind, it has not undergone a formal security audit yet. We encourage users to perform their own security assessment for their specific use cases. We are committed to maintaining and improving the security of this library.
 
 ## License
 Licensed under the MIT License. See [LICENSE](LICENSE) for details.
