@@ -25,13 +25,13 @@ println!("Secure data: {}", secret);
 Add to your `Cargo.toml`:
 ```toml
 [dependencies]
-memsafe = "0.1.4"
+memsafe = "0.1.6"
 ```
 
 For Windows support only:
 ```toml
 [dependencies]
-memsafe = { version = "0.1.4", default-features = false, features = ["windows"] }
+memsafe = { version = "0.1.6", default-features = false, features = ["windows"] }
 ```
 
 ## Milestones
