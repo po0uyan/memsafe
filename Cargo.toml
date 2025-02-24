@@ -1,6 +1,6 @@
 [package]
 name = "memsafe"
-version = "0.1.5"
+version = "0.1.6"
 edition = "2021"
 description = "A cross-platform Rust library for securely wrapping data in memory"
 authors = ["po0uyan <info@pouyan.me>", "mortezashojaei mshojaei179@gmail.com"]
