@@ -29,12 +29,14 @@ Add to your `Cargo.toml`:
 [dependencies]
 memsafe = "0.1.8"
 
+
 ```
 
 For Windows support only:
 ```toml
 [dependencies]
 memsafe = { version = "0.1.8", default-features = false, features = ["windows"] }
+
 
 ```
 ## Security Mechanisms: A Deep Dive for Technical Enthusiasts
