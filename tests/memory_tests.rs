@@ -62,4 +62,21 @@ mod memory_safety_tests {
         secret.push_str(" data");
         assert_eq!(secret.as_str(), "secret data");
     }
+    
+    #[test]
+    fn test_string_append_and_print() {
+        let mut secret = MemSafe::new(String::from("secret")).unwrap();
+        
+        secret.push_str(" data");
+        
+        assert_eq!(*secret, "secret data");
+        
+
+        let output = format!("Secure data: {}", *secret);
+        assert_eq!(output, "Secure data: secret data");
+        
+        let length = secret.len();
+        assert_eq!(length, 11);
+        assert_eq!(*secret, "secret data");
+    }
 }
