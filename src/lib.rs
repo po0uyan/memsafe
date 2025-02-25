@@ -8,10 +8,9 @@ use std::ops::{Deref, DerefMut};
 
 use raw_ptr::{ptr_deref, ptr_deref_mut, ptr_drop_in_place, ptr_write, ptr_write_bytes};
 #[cfg(windows)]
-use winapi::um::{
-    memoryapi::{VirtualAlloc, VirtualFree, VirtualLock, VirtualProtect, VirtualUnlock},
-    winnt::{MEM_COMMIT, MEM_RELEASE, MEM_RESERVE, PAGE_NOACCESS, PAGE_READONLY, PAGE_READWRITE}, // Added MEM_RELEASE
-};
+use winapi::um::
+    winnt::{MEM_COMMIT, MEM_RESERVE, PAGE_NOACCESS, PAGE_READONLY, PAGE_READWRITE, MEM_DECOMMIT} // Added MEM_RELEASE
+;
 
 #[derive(Debug)]
 pub struct MemoryError(io::Error);
@@ -61,54 +60,41 @@ impl<T> MemSafe<T> {
 
         #[cfg(windows)]
         {
-            let ptr = unsafe {
-                VirtualAlloc(
-                    ptr::null_mut(),
-                    size,
-                    MEM_COMMIT | MEM_RESERVE,
-                    PAGE_READWRITE,
-                )
-            };
-            if ptr.is_null() {
-                // Fixed: Use is_null() instead of MAP_FAILED
-                return Err(MemoryError(io::Error::last_os_error()));
-            }
+            let ptr = ffi::win::virtual_alloc(
+                std::ptr::null_mut(),
+                len,
+                MEM_COMMIT | MEM_RESERVE,
+                PAGE_READWRITE,
+            )?;
             let mem_safe = MemSafe {
-                ptr: ptr as *mut T,
-                len: size,
+                ptr,
+                len,
                 is_writable: UnsafeCell::new(true),
             };
-            unsafe {
-                ptr::write(mem_safe.ptr, value);
-            }
+            ptr_write(ptr, value);
             mem_safe.lock_memory()?;
-            mem_safe.make_noaccess()?;
+            mem_safe.make_readonly()?;
             Ok(mem_safe)
         }
     }
 
     fn make_noaccess(&self) -> Result<(), MemoryError> {
         #[cfg(unix)]
-        ffi::unix::mprotect(self.ptr, self.len, libc::PROT_NONE)?;
-        unsafe {
-            *self.is_writable.get() = false;
-            Ok(())
+        {
+            ffi::unix::mprotect(self.ptr, self.len, libc::PROT_NONE)?;
+            unsafe {
+                *self.is_writable.get() = false;
+                Ok(())
+            }
         }
 
         #[cfg(windows)]
-        unsafe {
-            let mut old_protect = 0;
-            if VirtualProtect(
-                self.ptr as *mut _,
-                self.len,
-                PAGE_NOACCESS,
-                &mut old_protect,
-            ) == 0
-            {
-                return Err(MemoryError(io::Error::last_os_error()));
+        {
+            ffi::win::virtual_protect(self.ptr, self.len, PAGE_NOACCESS, &mut 0)?;
+            unsafe {
+                *self.is_writable.get() = false;
+                Ok(())
             }
-            *self.is_writable.get() = false;
-            Ok(())
         }
     }
 
@@ -123,19 +109,12 @@ impl<T> MemSafe<T> {
         }
 
         #[cfg(windows)]
-        unsafe {
-            let mut old_protect = 0;
-            if VirtualProtect(
-                self.ptr as *mut _,
-                self.len,
-                PAGE_READWRITE,
-                &mut old_protect,
-            ) == 0
-            {
-                return Err(MemoryError(io::Error::last_os_error()));
+        {
+            ffi::win::virtual_protect(self.ptr, self.len, PAGE_READWRITE, &mut 0)?;
+            unsafe {
+                *self.is_writable.get() = true;
+                Ok(())
             }
-            *self.is_writable.get() = true;
-            Ok(())
         }
     }
 
@@ -150,19 +129,12 @@ impl<T> MemSafe<T> {
         }
 
         #[cfg(windows)]
-        unsafe {
-            let mut old_protect = 0;
-            if VirtualProtect(
-                self.ptr as *mut _,
-                self.len,
-                PAGE_READONLY,
-                &mut old_protect,
-            ) == 0
-            {
-                return Err(MemoryError(io::Error::last_os_error()));
+        {
+            ffi::win::virtual_protect(self.ptr, self.len, PAGE_READONLY, &mut 0)?;
+            unsafe {
+                *self.is_writable.get() = false;
+                Ok(())
             }
-            *self.is_writable.get() = false;
-            Ok(())
         }
     }
 
@@ -173,11 +145,8 @@ impl<T> MemSafe<T> {
         }
 
         #[cfg(windows)]
-        unsafe {
-            if VirtualLock(self.ptr as *mut _, self.len) == 0 {
-                return Err(MemoryError(io::Error::last_os_error()));
-            }
-            Ok(())
+        {
+            ffi::win::virtual_lock(self.ptr, self.len)
         }
     }
 
@@ -214,19 +183,21 @@ impl<T> DerefMut for MemSafe<T> {
 impl<T> Drop for MemSafe<T> {
     fn drop(&mut self) {
         #[cfg(unix)]
-        self.make_writable().ok();
-        ptr_drop_in_place(self.ptr);
-        ptr_write_bytes(self.ptr, 0, self.len);
-        ffi::unix::munlock(self.ptr, self.len).unwrap();
-        ffi::unix::munmap(self.ptr, self.len).unwrap();
+        {
+            self.make_writable().ok();
+            ptr_drop_in_place(self.ptr);
+            ptr_write_bytes(self.ptr, 0, self.len);
+            ffi::unix::munlock(self.ptr, self.len).unwrap();
+            ffi::unix::munmap(self.ptr, self.len).unwrap();
+        }
 
         #[cfg(windows)]
-        unsafe {
+        {
             self.make_writable().ok();
-            ptr::drop_in_place(self.ptr);
-            ptr::write_bytes(self.ptr as *mut u8, 0, self.len);
-            VirtualUnlock(self.ptr as *mut _, self.len);
-            VirtualFree(self.ptr as *mut _, 0, MEM_RELEASE); // Now in scope
+            ptr_drop_in_place(self.ptr);
+            ptr_write_bytes(self.ptr, 0, self.len);
+            ffi::win::virtual_unlock(self.ptr, self.len).unwrap();
+            ffi::win::virtual_free(self.ptr, self.len, MEM_DECOMMIT).unwrap();
         }
     }
 }
