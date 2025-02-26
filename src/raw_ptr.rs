@@ -1,4 +1,3 @@
-use std::ptr;
 
 pub fn ptr_write<T>(ptr: *mut T, val: T) {
     unsafe { ptr.write(val) };
