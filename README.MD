@@ -29,6 +29,7 @@ Add to your `Cargo.toml`:
 [dependencies]
 memsafe = "0.1.9"
 ```
+
 ## Security Mechanisms: A Deep Dive for Technical Enthusiasts
 
 The following milestones highlight the technical implementation and security mechanisms completed in `memsafe`, ensuring robust memory management for sensitive data in Rust:
