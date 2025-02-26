@@ -1,5 +1,6 @@
 use crate::MemoryError;
 
+/// Wrapper over `mmap`. Full documentation with `man mmap`.
 pub fn mmap<T>(
     len: usize,
     prot: i32,
@@ -15,6 +16,7 @@ pub fn mmap<T>(
     }
 }
 
+/// Wrapper over `mprotect`. Full documentation with `man mprotect`.
 pub fn mprotect<T>(ptr: *mut T, len: usize, prot: i32) -> Result<(), MemoryError> {
     if unsafe { libc::mprotect(ptr as *mut libc::c_void, len, prot) } != 0 {
         Err(MemoryError(std::io::Error::last_os_error()))
@@ -23,6 +25,7 @@ pub fn mprotect<T>(ptr: *mut T, len: usize, prot: i32) -> Result<(), MemoryError
     }
 }
 
+/// Wrapper over `mlock`. Full documentation with `man mlock`.
 pub fn mlock<T>(ptr: *mut T, len: usize) -> Result<(), MemoryError> {
     if unsafe { libc::mlock(ptr as *const libc::c_void, len) } != 0 {
         Err(MemoryError(std::io::Error::last_os_error()))
@@ -31,6 +34,8 @@ pub fn mlock<T>(ptr: *mut T, len: usize) -> Result<(), MemoryError> {
     }
 }
 
+/// Wrapper over `madvice`. Full documentation here:
+/// https://learn.microsoft.com/en-us/windows/win32/api/memoryapi/nf-memoryapi-virtualunlock
 pub fn madvice<T>(ptr: *mut T, len: usize, advice: i32) -> Result<(), MemoryError> {
     if unsafe { libc::madvise(ptr as *mut libc::c_void, len, advice) } != 0 {
         Err(MemoryError(std::io::Error::last_os_error()))
@@ -39,6 +44,7 @@ pub fn madvice<T>(ptr: *mut T, len: usize, advice: i32) -> Result<(), MemoryErro
     }
 }
 
+/// Wrapper over `munlock`. Full documentation with `man munlock`.
 pub fn munlock<T>(ptr: *mut T, len: usize) -> Result<(), MemoryError> {
     if unsafe { libc::munlock(ptr as *mut libc::c_void, len) } != 0 {
         Err(MemoryError(std::io::Error::last_os_error()))
@@ -47,6 +53,7 @@ pub fn munlock<T>(ptr: *mut T, len: usize) -> Result<(), MemoryError> {
     }
 }
 
+/// Wrapper over `munmap`. Full documentation with `man munmap`.
 pub fn munmap<T>(ptr: *mut T, len: usize) -> Result<(), MemoryError> {
     //
     if unsafe { libc::munmap(ptr as *mut libc::c_void, len) } != 0 {
