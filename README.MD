@@ -28,17 +28,8 @@ Add to your `Cargo.toml`:
 ```toml
 [dependencies]
 memsafe = "0.1.9"
-
-
 ```
 
-For Windows support only:
-```toml
-[dependencies]
-memsafe = { version = "0.1.9", default-features = false, features = ["windows"] }
-
-
-```
 ## Security Mechanisms: A Deep Dive for Technical Enthusiasts
 
 The following milestones highlight the technical implementation and security mechanisms completed in `memsafe`, ensuring robust memory management for sensitive data in Rust:
