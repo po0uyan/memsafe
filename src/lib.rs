@@ -3,6 +3,7 @@ mod ffi;
 mod raw_ptr;
 
 use std::cell::UnsafeCell;
+use std::ffi::c_void;
 use std::io;
 use std::ops::{Deref, DerefMut};
 
