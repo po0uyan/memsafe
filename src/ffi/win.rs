@@ -5,6 +5,8 @@ use winapi::{
 
 use crate::MemoryError;
 
+/// Wrapper over `VirtualAlloc`. Full documentation here:
+/// https://learn.microsoft.com/en-us/windows/win32/api/memoryapi/nf-memoryapi-virtualalloc
 pub fn virtual_alloc<T>(
     ptr: *mut c_void,
     len: usize,
@@ -19,6 +21,8 @@ pub fn virtual_alloc<T>(
     }
 }
 
+/// Wrapper over `VirtualFree`. Full documentation here:
+/// https://learn.microsoft.com/en-us/windows/win32/api/memoryapi/nf-memoryapi-virtualfree
 pub fn virtual_free<T>(ptr: *mut T, len: usize, free_type: u32) -> Result<(), MemoryError> {
     println!("fre");
     if unsafe { VirtualFree(ptr as *mut _, len, free_type) } == 0 {
@@ -28,7 +32,8 @@ pub fn virtual_free<T>(ptr: *mut T, len: usize, free_type: u32) -> Result<(), Me
     }
 }
 
-
+/// Wrapper over `VirtualProtect`. Full documentation here:
+/// https://learn.microsoft.com/en-us/windows/win32/api/memoryapi/nf-memoryapi-virtualprotect
 pub fn virtual_protect<T>(
     ptr: *mut T,
     len: usize,
@@ -42,6 +47,8 @@ pub fn virtual_protect<T>(
     }
 }
 
+/// Wrapper over `VirtualLock`. Full documentation here:
+/// https://learn.microsoft.com/en-us/windows/win32/api/memoryapi/nf-memoryapi-virtuallock
 pub fn virtual_lock<T>(ptr: *mut T, len: usize) -> Result<(), MemoryError> {
     if unsafe { VirtualLock(ptr as *mut _, len) } == 0 {
         Err(MemoryError(std::io::Error::last_os_error()))
@@ -50,6 +57,8 @@ pub fn virtual_lock<T>(ptr: *mut T, len: usize) -> Result<(), MemoryError> {
     }
 }
 
+/// Wrapper over `VirtualUnlock`. Full documentation here:
+/// https://learn.microsoft.com/en-us/windows/win32/api/memoryapi/nf-memoryapi-virtualunlock
 pub fn virtual_unlock<T>(ptr: *mut T, len: usize) -> Result<(), MemoryError> {
     if unsafe { VirtualUnlock(ptr as *mut _, len) } == 0 {
         Err(MemoryError(std::io::Error::last_os_error()))
