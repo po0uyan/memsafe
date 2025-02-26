@@ -49,8 +49,8 @@ impl<T> MemSafe<T> {
             mem_safe.make_noaccess()?;
         }
         // Windows doesn't allow for no access locked memory. So, the memory is kept readonly
-        // in Windows.
-        // See more in https://learn.microsoft.com/en-us/windows/win32/api/memoryapi/nf-memoryapi-virtuallock#remarks
+        // in Windows. See more in following link:
+        // https://learn.microsoft.com/en-us/windows/win32/api/memoryapi/nf-memoryapi-virtuallock#remarks
         #[cfg(windows)]
         {
             mem_safe.make_readonly()?;
