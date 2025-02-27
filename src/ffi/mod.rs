@@ -123,16 +123,9 @@ pub fn mem_dealloc<T>(ptr: *mut T, len: usize) -> Result<(), MemoryError> {
 /// * `len` must be correct, matching the size of the allocated region.
 /// * Accessing the memory after calling this function will trigger a segmentation fault (Unix) or
 ///   access violation (Windows).
+#[cfg(unix)]
 pub fn mem_noaccess<T>(ptr: *mut T, len: usize) -> Result<(), MemoryError> {
-    #[cfg(unix)]
-    {
-        unix::mprotect(ptr, len, libc::PROT_NONE)
-    }
-
-    #[cfg(windows)]
-    {
-        win::virtual_protect(ptr, len, PAGE_NOACCESS, &mut 0)
-    }
+    unix::mprotect(ptr, len, libc::PROT_NONE)
 }
 
 /// Marks a memory region as read-only.
@@ -228,7 +221,7 @@ pub fn mem_readwrite<T>(ptr: *mut T, len: usize) -> Result<(), MemoryError> {
 ///
 /// * **Unix**: Uses `mlock`, which prevents the specified memory range from being swapped out.
 /// * **Windows**: Uses `VirtualLock`, which locks the memory in RAM and prevents paging.
-///   - **Windows Limitation**: 
+///   - **Windows Limitation**:
 ///     - All pages in the specified region must be committed.
 ///     - Memory protected with `PAGE_NOACCESS` cannot be locked.
 ///
@@ -285,4 +278,9 @@ pub fn mem_unlock<T>(ptr: *mut T, len: usize) -> Result<(), MemoryError> {
     {
         win::virtual_unlock(ptr, len)
     }
+}
+
+#[cfg(target_os = "linux")]
+pub fn mem_no_dump<T>(ptr: *mut T, len: usize) -> Result<(), MemoryError> {
+    ffi::unix::madvice(self.ptr as *mut c_void, self.len, libc::MADV_DONTDUMP)
 }

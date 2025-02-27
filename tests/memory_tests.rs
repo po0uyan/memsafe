@@ -7,8 +7,18 @@ mod memory_safety_tests {
     use super::*;
 
     #[test]
+    fn test_str_new_drop() {
+        let safe_str = MemSafe::new("test").unwrap();
+    }
+
+    #[test]
+    fn test_str_new_readonly_drop() {
+        let safe_str = MemSafe::new("test").unwrap().read_write();
+    }
+
+    #[test]
     fn test_empty_string_handling() {
-        let empty_safe = MemSafe::new(String::new()).unwrap();
+        let empty_safe = MemSafe::new(String::new()).unwrap().read_only().unwrap();
         assert_eq!(empty_safe.as_str(), "");
         assert_eq!(empty_safe.len(), 0);
         assert!(empty_safe.is_empty());
@@ -28,15 +38,18 @@ mod memory_safety_tests {
 
     #[test]
     fn test_string_operations() {
-        let mut safe_string = MemSafe::new(String::from("Hello")).unwrap();
+        let mut safe_string = MemSafe::new(String::from("Hello"))
+            .unwrap()
+            .read_write()
+            .unwrap();
         safe_string.push_str(", ");
         safe_string.push_str("World!");
         assert_eq!(safe_string.as_str(), "Hello, World!");
-        
+
         // Test truncate
         safe_string.truncate(5);
         assert_eq!(safe_string.as_str(), "Hello");
-        
+
         // Test clear
         safe_string.clear();
         assert!(safe_string.is_empty());
@@ -44,12 +57,15 @@ mod memory_safety_tests {
 
     #[test]
     fn test_clone_behavior() {
-        let original = MemSafe::new(String::from("original_data")).unwrap();
+        let original = MemSafe::new(String::from("original_data"))
+            .unwrap()
+            .read_only()
+            .unwrap();
         let cloned = original.clone();
-        
+
         assert_eq!(original.as_str(), cloned.as_str());
         assert_eq!(original.len(), cloned.len());
-        
+
         // Ensure they are separate instances
         drop(original);
         assert_eq!(cloned.as_str(), "original_data");
@@ -57,24 +73,29 @@ mod memory_safety_tests {
 
     #[test]
     fn test_mem_safe_string() {
-        let mut secret = MemSafe::new(String::from("secret")).unwrap();
+        let mut secret = MemSafe::new(String::from("secret"))
+            .unwrap()
+            .read_write()
+            .unwrap();
         assert_eq!(secret.as_str(), "secret");
         secret.push_str(" data");
         assert_eq!(secret.as_str(), "secret data");
     }
-    
+
     #[test]
     fn test_string_append_and_print() {
-        let mut secret = MemSafe::new(String::from("secret")).unwrap();
-        
+        let mut secret = MemSafe::new(String::from("secret"))
+            .unwrap()
+            .read_write()
+            .unwrap();
+
         secret.push_str(" data");
-        
+
         assert_eq!(*secret, "secret data");
-        
 
         let output = format!("Secure data: {}", *secret);
         assert_eq!(output, "Secure data: secret data");
-        
+
         let length = secret.len();
         assert_eq!(length, 11);
         assert_eq!(*secret, "secret data");
