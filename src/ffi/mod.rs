@@ -1,10 +1,10 @@
 use crate::MemoryError;
 
 #[cfg(unix)]
-pub mod unix;
+mod unix;
 
 #[cfg(windows)]
-pub mod win;
+mod win;
 #[cfg(windows)]
 use winapi::um::winnt::{
     MEM_COMMIT, MEM_DECOMMIT, MEM_RESERVE, PAGE_READONLY, PAGE_READWRITE,
@@ -282,5 +282,5 @@ pub fn mem_unlock<T>(ptr: *mut T, len: usize) -> Result<(), MemoryError> {
 
 #[cfg(target_os = "linux")]
 pub fn mem_no_dump<T>(ptr: *mut T, len: usize) -> Result<(), MemoryError> {
-    ffi::unix::madvice(self.ptr as *mut c_void, self.len, libc::MADV_DONTDUMP)
+    unix::madvice(ptr as *mut libc::c_void, len, libc::MADV_DONTDUMP)
 }

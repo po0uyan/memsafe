@@ -63,7 +63,7 @@ impl<T> MemSafe<T, NoAccess> {
         let ptr = mem_alloc(len)?;
         mem_lock(ptr, len)?;
         #[cfg(target_os = "linux")]
-        mem_no_dump()?;
+        mem_no_dump(ptr, len)?;
         ptr_write(ptr, value);
         // mem_noaccess(ptr, len)?;
         Ok(MemSafe {
