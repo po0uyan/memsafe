@@ -13,7 +13,7 @@ This is the official `memsafe` crate, hosted at [GitHub](https://github.com/po0u
 
 ```rust
 use memsafe::MemSafe;
-let mut secret = MemSafe::new(String::from("secret")).unwrap();
+let mut secret = MemSafe::new(String::from("secret")).unwrap().read_write().unwrap();
 secret.push_str(" data");
 println!("Secure data: {}", *secret);
 ```

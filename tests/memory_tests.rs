@@ -6,14 +6,61 @@ use memsafe::MemSafe;
 mod memory_safety_tests {
     use super::*;
 
+    #[allow(unused_variables)]
     #[test]
     fn test_str_new_drop() {
-        let safe_str = MemSafe::new("test").unwrap();
+        let safe_str = MemSafe::new(0).unwrap();
+    }
+
+    #[allow(unused_variables)]
+    #[test]
+    fn test_str_new_readonly_drop() {
+        let safe_str = MemSafe::new(0).unwrap().read_only().unwrap();
+    }
+
+    #[allow(unused_variables)]
+    #[test]
+    fn test_str_new_readwrite_drop() {
+        let safe_str = MemSafe::new(0).unwrap().read_write().unwrap();
+    }
+
+    #[allow(unused_variables)]
+    #[test]
+    fn test_str_new_readonly_readwrite_drop() {
+        let safe_str = MemSafe::new(0)
+            .unwrap()
+            .read_only()
+            .unwrap()
+            .read_write()
+            .unwrap();
     }
 
     #[test]
-    fn test_str_new_readonly_drop() {
-        let safe_str = MemSafe::new("test").unwrap().read_write();
+    fn test_empty_u8_array_read() {
+        let empty_safe = MemSafe::new([0_u8, 1_u8, 2_u8, 3_u8]).unwrap().read_only().unwrap();
+        assert_eq!(empty_safe[0], 0);
+        assert_eq!(empty_safe[1], 1);
+        assert_eq!(empty_safe[2], 2);
+        assert_eq!(empty_safe[3], 3);
+        assert_eq!(empty_safe.len(), 4);
+    }
+
+    #[test]
+    fn test_empty_u8_array_read_and_write() {
+        let mut empty_safe = MemSafe::new([0_u8, 1_u8, 2_u8, 3_u8]).unwrap().read_write().unwrap();
+        assert_eq!(empty_safe[0], 0);
+        assert_eq!(empty_safe[1], 1);
+        assert_eq!(empty_safe[2], 2);
+        assert_eq!(empty_safe[3], 3);
+        empty_safe[0] = 1;
+        empty_safe[1] = 2;
+        empty_safe[2] = 3;
+        empty_safe[3] = 4;
+        assert_eq!(empty_safe[0], 1);
+        assert_eq!(empty_safe[1], 2);
+        assert_eq!(empty_safe[2], 3);
+        assert_eq!(empty_safe[3], 4);
+        assert_eq!(empty_safe.len(), 4);
     }
 
     #[test]
