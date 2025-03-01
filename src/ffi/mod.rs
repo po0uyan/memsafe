@@ -7,7 +7,7 @@ pub mod unix;
 pub mod win;
 #[cfg(windows)]
 use winapi::um::winnt::{
-    MEM_COMMIT, MEM_DECOMMIT, MEM_RESERVE, PAGE_NOACCESS, PAGE_READONLY, PAGE_READWRITE,
+    MEM_COMMIT, MEM_DECOMMIT, MEM_RESERVE, PAGE_READONLY, PAGE_READWRITE,
 };
 
 /// Allocates page-alined memory dynamically.

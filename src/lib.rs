@@ -9,8 +9,10 @@ use std::ops::{Deref, DerefMut};
 
 #[cfg(target_os = "linux")]
 use ffi::mem_no_dump;
+#[cfg(unix)]
+use ffi::mem_noaccess;
 use ffi::{
-    mem_alloc, mem_dealloc, mem_lock, mem_noaccess, mem_readonly, mem_readwrite, mem_unlock,
+    mem_alloc, mem_dealloc, mem_lock, mem_readonly, mem_readwrite, mem_unlock,
 };
 use raw_ptr::{ptr_deref, ptr_deref_mut, ptr_drop_in_place, ptr_write, ptr_write_bytes};
 
