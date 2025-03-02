@@ -95,6 +95,7 @@ jobs:
         with:
           toolchain: stable
           targets: ${{ matrix.target }}
+          components: clippy
           
       # Cache dependencies to speed up builds
       - name: Cache cargo registry
@@ -113,6 +114,16 @@ jobs:
         if: matrix.os == 'ubuntu-latest' && matrix.arch != 'x86_64'
         run: |
           cargo install cross --git https://github.com/cross-rs/cross
+
+      # Run Clippy for the native architectures
+      - name: Run Clippy (native)
+        if: (matrix.os == 'ubuntu-latest' && matrix.arch == 'x86_64') || (matrix.os == 'macos-latest' && matrix.arch == 'x86_64') || (matrix.os == 'windows-latest' && matrix.arch == 'x86_64')
+        run: cargo clippy --target ${{ matrix.target }} -- -D warnings
+
+      # Run Clippy for Linux cross-compilation
+      - name: Run Clippy (Linux cross-compilation)
+        if: matrix.os == 'ubuntu-latest' && matrix.arch != 'x86_64'
+        run: cross clippy --target ${{ matrix.target }} -- -D warnings
 
       # Native builds and tests
       - name: Build (native)
