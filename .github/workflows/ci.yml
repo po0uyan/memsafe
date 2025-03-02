@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - dev
+  pull_request:
+    branches:
+      - dev
 
 jobs:
   test:
@@ -11,13 +14,77 @@ jobs:
     strategy:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
+        arch: [x86_64, aarch64, i686, armv7, ppc64le, riscv64, mips64]
+        exclude:
+          # Exclude Windows on non-x86 architectures
+          - os: windows-latest
+            arch: aarch64
+          - os: windows-latest
+            arch: armv7
+          - os: windows-latest
+            arch: ppc64le
+          - os: windows-latest
+            arch: riscv64
+          - os: windows-latest
+            arch: mips64
+          # Exclude macOS on 32-bit and non-Apple architectures
+          - os: macos-latest
+            arch: i686
+          - os: macos-latest
+            arch: armv7
+          - os: macos-latest
+            arch: ppc64le
+          - os: macos-latest
+            arch: riscv64
+          - os: macos-latest
+            arch: mips64
         include:
+          # x86_64 targets (64-bit)
           - os: ubuntu-latest
+            arch: x86_64
             target: x86_64-unknown-linux-gnu
           - os: macos-latest
+            arch: x86_64
             target: x86_64-apple-darwin
           - os: windows-latest
+            arch: x86_64
             target: x86_64-pc-windows-msvc
+          
+          # ARM64/AArch64 targets (64-bit)
+          - os: ubuntu-latest
+            arch: aarch64
+            target: aarch64-unknown-linux-gnu
+          - os: macos-latest
+            arch: aarch64
+            target: aarch64-apple-darwin
+          
+          # i686 targets (32-bit x86)
+          - os: ubuntu-latest
+            arch: i686
+            target: i686-unknown-linux-gnu
+          - os: windows-latest
+            arch: i686
+            target: i686-pc-windows-msvc
+          
+          # ARM32/ARMv7 targets (32-bit)
+          - os: ubuntu-latest
+            arch: armv7
+            target: armv7-unknown-linux-gnueabihf
+            
+          # PowerPC 64-bit Little Endian
+          - os: ubuntu-latest
+            arch: ppc64le
+            target: powerpc64le-unknown-linux-gnu
+            
+          # RISC-V 64-bit
+          - os: ubuntu-latest
+            arch: riscv64
+            target: riscv64gc-unknown-linux-gnu
+            
+          # MIPS 64-bit
+          - os: ubuntu-latest
+            arch: mips64
+            target: mips64-unknown-linux-gnuabi64
       fail-fast: false
     steps:
       - name: Checkout code
@@ -28,13 +95,53 @@ jobs:
         with:
           toolchain: stable
           targets: ${{ matrix.target }}
+          
+      # Cache dependencies to speed up builds
+      - name: Cache cargo registry
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-${{ matrix.target }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ matrix.target }}-cargo-
 
-      - name: Install dependencies (Linux)
-        if: matrix.os == 'ubuntu-latest'
-        run: sudo apt-get update && sudo apt-get install -y build-essential
+      # Install cross for more efficient cross-compilation
+      - name: Install cross
+        if: matrix.os == 'ubuntu-latest' && matrix.arch != 'x86_64'
+        run: |
+          cargo install cross --git https://github.com/cross-rs/cross
 
-      - name: Build
+      # Native builds and tests
+      - name: Build (native)
+        if: (matrix.os == 'ubuntu-latest' && matrix.arch == 'x86_64') || (matrix.os == 'macos-latest') || (matrix.os == 'windows-latest')
         run: cargo build --verbose --target ${{ matrix.target }}
 
-      - name: Run tests
+      - name: Test (native)
+        if: (matrix.os == 'ubuntu-latest' && matrix.arch == 'x86_64') || (matrix.os == 'macos-latest' && matrix.arch == 'x86_64') || (matrix.os == 'windows-latest' && matrix.arch == 'x86_64')
         run: cargo test --verbose --target ${{ matrix.target }}
+
+      # Cross-compilation for Linux targets using cross
+      - name: Build (Linux cross-compilation)
+        if: matrix.os == 'ubuntu-latest' && matrix.arch != 'x86_64'
+        run: cross build --verbose --target ${{ matrix.target }}
+
+      - name: Test (Linux cross-compilation)
+        if: matrix.os == 'ubuntu-latest' && matrix.arch != 'x86_64'
+        run: cross test --verbose --target ${{ matrix.target }}
+
+      # Windows i686 cross-compilation
+      - name: Build and Test (Windows i686)
+        if: matrix.os == 'windows-latest' && matrix.arch == 'i686'
+        run: |
+          cargo build --verbose --target ${{ matrix.target }}
+          cargo test --verbose --target ${{ matrix.target }}
+
+      # macOS aarch64 cross-compilation
+      - name: Build and Test (macOS aarch64)
+        if: matrix.os == 'macos-latest' && matrix.arch == 'aarch64'
+        run: |
+          cargo build --verbose --target ${{ matrix.target }}
+          cargo test --verbose --target ${{ matrix.target }}
