@@ -11,9 +11,7 @@ use std::ops::{Deref, DerefMut};
 use ffi::mem_no_dump;
 #[cfg(unix)]
 use ffi::mem_noaccess;
-use ffi::{
-    mem_alloc, mem_dealloc, mem_lock, mem_readonly, mem_readwrite, mem_unlock,
-};
+use ffi::{mem_alloc, mem_dealloc, mem_lock, mem_readonly, mem_readwrite, mem_unlock};
 use raw_ptr::{ptr_deref, ptr_deref_mut, ptr_drop_in_place, ptr_write, ptr_write_bytes};
 
 #[derive(Debug)]
@@ -40,7 +38,6 @@ pub struct ReadOnly;
 /// Represents a memory state with read-write permissions.
 pub struct ReadWrite;
 
-
 /// A memory-safe wrapper around raw pointers that ensures proper memory management.
 ///
 /// The memory can have different states:
@@ -55,6 +52,12 @@ pub struct MemSafe<T, State> {
     _state: PhantomData<State>,
 }
 
+unsafe impl<T> Sync for MemSafe<T, NoAccess> where T: Sync {}
+unsafe impl<T> Sync for MemSafe<T, ReadOnly> where T: Sync {}
+unsafe impl<T> Send for MemSafe<T, NoAccess> where T: Send {}
+unsafe impl<T> Send for MemSafe<T, ReadOnly> where T: Send {}
+unsafe impl<T> Send for MemSafe<T, ReadWrite> where T: Send {}
+
 #[cfg(unix)]
 impl<T> MemSafe<T, NoAccess> {
     /// Allocates a new instance of `T` in locked memory with no access permissions.
@@ -65,7 +68,7 @@ impl<T> MemSafe<T, NoAccess> {
         #[cfg(target_os = "linux")]
         mem_no_dump(ptr, len)?;
         ptr_write(ptr, value);
-        // mem_noaccess(ptr, len)?;
+        mem_noaccess(ptr, len)?;
         Ok(MemSafe {
             ptr,
             len,
@@ -74,7 +77,7 @@ impl<T> MemSafe<T, NoAccess> {
     }
 
     /// Does nothing and return the object itself.
-    pub fn no_access(self) -> Result<MemSafe<T, NoAccess>, Infallible> {
+    pub fn no_access(self) -> Result<Self, Infallible> {
         Ok(self)
     }
 
@@ -167,7 +170,7 @@ impl<T> MemSafe<T, ReadWrite> {
     }
 
     /// Changes the memory state to `ReadOnly`.
-    pub fn read_only(self) -> Result<Self, MemoryError> {
+    pub fn read_only(self) -> Result<MemSafe<T, ReadOnly>, MemoryError> {
         mem_readonly(self.ptr, self.len)?;
         let new_self = MemSafe {
             ptr: self.ptr,
@@ -179,7 +182,7 @@ impl<T> MemSafe<T, ReadWrite> {
     }
 
     /// Does nothing and return the object itself.
-    pub fn read_write(self) -> Result<MemSafe<T, ReadWrite>, Infallible> {
+    pub fn read_write(self) -> Result<Self, Infallible> {
         Ok(self)
     }
 }
@@ -212,7 +215,7 @@ impl<T, State> Drop for MemSafe<T, State> {
     fn drop(&mut self) {
         mem_readwrite(self.ptr, self.len).unwrap();
         ptr_drop_in_place(self.ptr);
-        ptr_write_bytes(self.ptr, 0, self.len);
+        ptr_write_bytes(self.ptr, 0, 1);
         mem_unlock(self.ptr, self.len).unwrap();
         mem_dealloc(self.ptr, self.len).unwrap();
     }

@@ -4,6 +4,8 @@ use memsafe::MemSafe;
 /// These tests verify the core functionality of the MemSafe wrapper
 #[cfg(test)]
 mod memory_safety_tests {
+    use std::sync::Arc;
+
     use super::*;
 
     #[allow(unused_variables)]
@@ -37,7 +39,10 @@ mod memory_safety_tests {
 
     #[test]
     fn test_empty_u8_array_read() {
-        let empty_safe = MemSafe::new([0_u8, 1_u8, 2_u8, 3_u8]).unwrap().read_only().unwrap();
+        let empty_safe = MemSafe::new([0_u8, 1_u8, 2_u8, 3_u8])
+            .unwrap()
+            .read_only()
+            .unwrap();
         assert_eq!(empty_safe[0], 0);
         assert_eq!(empty_safe[1], 1);
         assert_eq!(empty_safe[2], 2);
@@ -47,7 +52,10 @@ mod memory_safety_tests {
 
     #[test]
     fn test_empty_u8_array_read_and_write() {
-        let mut empty_safe = MemSafe::new([0_u8, 1_u8, 2_u8, 3_u8]).unwrap().read_write().unwrap();
+        let mut empty_safe = MemSafe::new([0_u8, 1_u8, 2_u8, 3_u8])
+            .unwrap()
+            .read_write()
+            .unwrap();
         assert_eq!(empty_safe[0], 0);
         assert_eq!(empty_safe[1], 1);
         assert_eq!(empty_safe[2], 2);
@@ -147,4 +155,57 @@ mod memory_safety_tests {
         assert_eq!(length, 11);
         assert_eq!(*secret, "secret data");
     }
+
+    #[test]
+    fn test_sync() {
+        const LEN: usize = 1024;
+        let mem_safe = MemSafe::new([0; LEN]).unwrap();
+        evalute_sync(&mem_safe);
+        let mut ms = mem_safe.read_write().unwrap();
+        for i in 0..LEN {
+            ms[i] = i;
+        }
+        // Sharing mem_safe between 1024 threads...
+        let mem_safe = Arc::new(ms.read_only().unwrap());
+        let _ = (0..1024)
+            .map(|_| {
+                let ms = mem_safe.clone();
+                std::thread::spawn(move || {
+                    for i in 0..LEN {
+                        assert_eq!(ms[i], i);
+                    }
+                })
+            })
+            .collect::<Vec<_>>()
+            .into_iter()
+            .map(|hndl| hndl.join());
+
+    }
+
+    #[test]
+    fn test_send() {
+        const LEN: usize = 1024;
+        let mut ms = MemSafe::new([0; LEN]).unwrap().read_write().unwrap();
+        evalute_send(&ms);
+        for i in 0..LEN {
+            ms[i] = i;
+        }
+        let ms = ms.read_only().unwrap();
+
+        // Sending mem_safe to another thread to duplicate all elements
+        let hndl = std::thread::spawn(move || {
+            let mut ms = ms.read_write().unwrap();
+            for i in 0..LEN {
+                ms[i] *= 2;
+            }
+            ms.read_only().unwrap()
+        });
+        let mem_safe = hndl.join().unwrap();
+        for i in 0..LEN {
+            assert_eq!(mem_safe[i], i * 2);
+        }
+    }
+
+    fn evalute_sync<T: Sync>(_: &T) {}
+    fn evalute_send<T: Send>(_: &T) {}
 }
