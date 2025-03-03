@@ -48,7 +48,6 @@ pub struct ReadWrite;
 /// The transitions between states ensure security and prevent unintended modifications.
 pub struct MemSafe<T, State> {
     ptr: *mut T,
-    len: usize,
     _state: PhantomData<State>,
 }
 
@@ -71,7 +70,6 @@ impl<T> MemSafe<T, NoAccess> {
         mem_noaccess(ptr, len)?;
         Ok(MemSafe {
             ptr,
-            len,
             _state: Default::default(),
         })
     }
@@ -83,10 +81,9 @@ impl<T> MemSafe<T, NoAccess> {
 
     // Changes the memory state to `ReadOnly`.
     pub fn read_only(self) -> Result<MemSafe<T, ReadOnly>, MemoryError> {
-        mem_readonly(self.ptr, self.len)?;
+        mem_readonly(self.ptr, Self::len())?;
         let new_self = MemSafe {
             ptr: self.ptr,
-            len: self.len,
             _state: Default::default(),
         };
         std::mem::forget(self);
@@ -95,10 +92,9 @@ impl<T> MemSafe<T, NoAccess> {
 
     /// Changes the memory state to `ReadWrite`.
     pub fn read_write(self) -> Result<MemSafe<T, ReadWrite>, MemoryError> {
-        mem_readwrite(self.ptr, self.len)?;
+        mem_readwrite(self.ptr, Self::len())?;
         let new_self = MemSafe {
             ptr: self.ptr,
-            len: self.len,
             _state: Default::default(),
         };
         std::mem::forget(self);
@@ -127,10 +123,9 @@ impl<T> MemSafe<T, ReadOnly> {
     /// Changes the memory state to `NoAccess`.
     #[cfg(unix)]
     pub fn no_access(self) -> Result<MemSafe<T, NoAccess>, MemoryError> {
-        mem_noaccess(self.ptr, self.len)?;
+        mem_noaccess(self.ptr, Self::len())?;
         let new_self = MemSafe {
             ptr: self.ptr,
-            len: self.len,
             _state: Default::default(),
         };
         std::mem::forget(self);
@@ -144,10 +139,9 @@ impl<T> MemSafe<T, ReadOnly> {
 
     /// Changes the memory state to `ReadWrite`.
     pub fn read_write(self) -> Result<MemSafe<T, ReadWrite>, MemoryError> {
-        mem_readwrite(self.ptr, self.len)?;
+        mem_readwrite(self.ptr, Self::len())?;
         let new_self = MemSafe {
             ptr: self.ptr,
-            len: self.len,
             _state: Default::default(),
         };
         std::mem::forget(self);
@@ -159,10 +153,9 @@ impl<T> MemSafe<T, ReadWrite> {
     /// Changes the memory state to `NoAccess`.
     #[cfg(unix)]
     pub fn no_access(self) -> Result<MemSafe<T, NoAccess>, MemoryError> {
-        mem_noaccess(self.ptr, self.len)?;
+        mem_noaccess(self.ptr, Self::len())?;
         let new_self = MemSafe {
             ptr: self.ptr,
-            len: self.len,
             _state: Default::default(),
         };
         std::mem::forget(self);
@@ -171,10 +164,9 @@ impl<T> MemSafe<T, ReadWrite> {
 
     /// Changes the memory state to `ReadOnly`.
     pub fn read_only(self) -> Result<MemSafe<T, ReadOnly>, MemoryError> {
-        mem_readonly(self.ptr, self.len)?;
+        mem_readonly(self.ptr, Self::len())?;
         let new_self = MemSafe {
             ptr: self.ptr,
-            len: self.len,
             _state: Default::default(),
         };
         std::mem::forget(self);
@@ -184,6 +176,12 @@ impl<T> MemSafe<T, ReadWrite> {
     /// Does nothing and return the object itself.
     pub fn read_write(self) -> Result<Self, Infallible> {
         Ok(self)
+    }
+}
+
+impl<T, S> MemSafe<T, S> {
+    const fn len() -> usize {
+        std::mem::size_of::<T>()
     }
 }
 
@@ -213,10 +211,10 @@ impl<T> DerefMut for MemSafe<T, ReadWrite> {
 /// Cleans up allocated memory upon `MemSafe` drop.
 impl<T, State> Drop for MemSafe<T, State> {
     fn drop(&mut self) {
-        mem_readwrite(self.ptr, self.len).unwrap();
+        mem_readwrite(self.ptr, Self::len()).unwrap();
         ptr_drop_in_place(self.ptr);
         ptr_write_bytes(self.ptr, 0, 1);
-        mem_unlock(self.ptr, self.len).unwrap();
-        mem_dealloc(self.ptr, self.len).unwrap();
+        mem_unlock(self.ptr, Self::len()).unwrap();
+        mem_dealloc(self.ptr, Self::len()).unwrap();
     }
 }
