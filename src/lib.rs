@@ -12,7 +12,7 @@ use ffi::mem_no_dump;
 #[cfg(unix)]
 use ffi::mem_noaccess;
 use ffi::{mem_alloc, mem_dealloc, mem_lock, mem_readonly, mem_readwrite, mem_unlock};
-use raw_ptr::{ptr_deref, ptr_deref_mut, ptr_drop_in_place, ptr_write, ptr_write_bytes};
+use raw_ptr::{ptr_deref, ptr_deref_mut, ptr_drop_in_place, ptr_write, ptr_fill_zero};
 
 #[derive(Debug)]
 pub struct MemoryError(io::Error);
@@ -213,7 +213,7 @@ impl<T, State> Drop for MemSafe<T, State> {
     fn drop(&mut self) {
         mem_readwrite(self.ptr, Self::len()).unwrap();
         ptr_drop_in_place(self.ptr);
-        ptr_write_bytes(self.ptr, 0, 1);
+        ptr_fill_zero(self.ptr);
         mem_unlock(self.ptr, Self::len()).unwrap();
         mem_dealloc(self.ptr, Self::len()).unwrap();
     }
