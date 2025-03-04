@@ -200,7 +200,6 @@ impl<T, S> MemSafe<T, S> {
     }
 }
 
-/// Allows dereferencing `MemSafe` in `ReadOnly` state.
 impl<T> Deref for MemSafe<T, ReadOnly> {
     type Target = T;
     fn deref(&self) -> &Self::Target {
@@ -208,7 +207,12 @@ impl<T> Deref for MemSafe<T, ReadOnly> {
     }
 }
 
-/// Allows dereferencing `MemSafe` in `ReadWrite` state.
+impl<T> AsRef<T> for MemSafe<T, ReadOnly> {
+    fn as_ref(&self) -> &T {
+        ptr_deref(self.ptr)
+    }
+}
+
 impl<T> Deref for MemSafe<T, ReadWrite> {
     type Target = T;
     fn deref(&self) -> &Self::Target {
@@ -216,14 +220,24 @@ impl<T> Deref for MemSafe<T, ReadWrite> {
     }
 }
 
-/// Allows mutable dereferencing of `MemSafe` in `ReadWrite` state.
+impl<T> AsRef<T> for MemSafe<T, ReadWrite> {
+    fn as_ref(&self) -> &T {
+        ptr_deref(self.ptr)
+    }
+}
+
 impl<T> DerefMut for MemSafe<T, ReadWrite> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         ptr_deref_mut(self.ptr)
     }
 }
 
-/// Cleans up allocated memory upon `MemSafe` drop.
+impl<T> AsMut<T> for MemSafe<T, ReadWrite> {
+    fn as_mut(&mut self) -> &mut T {
+        ptr_deref_mut(self.ptr)
+    }
+}
+
 impl<T, State> Drop for MemSafe<T, State> {
     fn drop(&mut self) {
         mem_readwrite(self.ptr, Self::len()).unwrap();
