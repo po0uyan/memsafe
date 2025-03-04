@@ -46,7 +46,22 @@ pub struct ReadWrite;
 /// - `ReadWrite`: Memory is readable and writable.
 ///
 /// The transitions between states ensure security and prevent unintended modifications.
-pub struct MemSafe<T, State> {
+#[cfg(unix)]
+pub struct MemSafe<T, State=NoAccess> {
+    ptr: *mut T,
+    _state: PhantomData<State>,
+}
+
+/// A memory-safe wrapper around raw pointers that ensures proper memory management.
+///
+/// The memory can have different states:
+/// - `NoAccess`: Memory cannot be read or written (Unix only).
+/// - `ReadOnly`: Memory is read-only.
+/// - `ReadWrite`: Memory is readable and writable.
+///
+/// The transitions between states ensure security and prevent unintended modifications.
+#[cfg(windows)]
+pub struct MemSafe<T, State=ReadOnly> {
     ptr: *mut T,
     _state: PhantomData<State>,
 }
