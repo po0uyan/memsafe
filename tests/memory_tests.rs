@@ -4,7 +4,10 @@ use memsafe::MemSafe;
 /// These tests verify the core functionality of the MemSafe wrapper
 #[cfg(test)]
 mod memory_safety_tests {
-    use std::sync::Arc;
+    use std::{
+        io::{Cursor, Read, Write},
+        sync::Arc,
+    };
 
     use super::*;
 
@@ -138,6 +141,20 @@ mod memory_safety_tests {
     }
 
     #[test]
+    fn test_read_compatibility() {
+        const STR: &str = "this is a secret";
+        let mut cur = Cursor::new(Vec::new());
+        assert_eq!(STR.len(), cur.write(STR.as_bytes()).unwrap());
+        cur.set_position(0);
+        let mut mem_safe = MemSafe::new([0_u8; 32]).unwrap().read_write().unwrap();
+        assert_eq!(STR.len(), cur.read(&mut *mem_safe).unwrap());
+        STR.as_bytes()
+            .iter()
+            .enumerate()
+            .for_each(|(idx, b1)| assert_eq!(b1, &mem_safe[idx]));
+    }
+
+    #[test]
     fn test_string_append_and_print() {
         let mut secret = MemSafe::new(String::from("secret"))
             .unwrap()
@@ -179,7 +196,6 @@ mod memory_safety_tests {
             .collect::<Vec<_>>()
             .into_iter()
             .map(|hndl| hndl.join());
-
     }
 
     #[test]
