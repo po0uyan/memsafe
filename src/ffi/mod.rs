@@ -3,6 +3,12 @@ use crate::MemoryError;
 #[cfg(unix)]
 mod unix;
 
+#[cfg(unix)]
+use libc::{MAP_ANONYMOUS, MAP_PRIVATE, PROT_NONE, PROT_READ, PROT_WRITE};
+
+#[cfg(target_os = "linux")]
+use libc::{c_void, MADV_DONTDUMP};
+
 #[cfg(windows)]
 mod win;
 #[cfg(windows)]
@@ -38,8 +44,8 @@ pub fn mem_alloc<T>(len: usize) -> Result<*mut T, MemoryError> {
     {
         unix::mmap(
             len,
-            libc::PROT_READ | libc::PROT_WRITE,
-            libc::MAP_PRIVATE | libc::MAP_ANONYMOUS,
+            PROT_READ | PROT_WRITE,
+            MAP_PRIVATE | MAP_ANONYMOUS,
             -1,
             0,
         )
@@ -123,7 +129,8 @@ pub fn mem_dealloc<T>(ptr: *mut T, len: usize) -> Result<(), MemoryError> {
 ///   access violation (Windows).
 #[cfg(unix)]
 pub fn mem_noaccess<T>(ptr: *mut T, len: usize) -> Result<(), MemoryError> {
-    unix::mprotect(ptr, len, libc::PROT_NONE)
+
+    unix::mprotect(ptr, len, PROT_NONE)
 }
 
 /// Marks a memory region as read-only.
@@ -155,7 +162,7 @@ pub fn mem_noaccess<T>(ptr: *mut T, len: usize) -> Result<(), MemoryError> {
 pub fn mem_readonly<T>(ptr: *mut T, len: usize) -> Result<(), MemoryError> {
     #[cfg(unix)]
     {
-        unix::mprotect(ptr, len, libc::PROT_READ)
+        unix::mprotect(ptr, len, PROT_READ)
     }
 
     #[cfg(windows)]
@@ -191,7 +198,7 @@ pub fn mem_readonly<T>(ptr: *mut T, len: usize) -> Result<(), MemoryError> {
 pub fn mem_readwrite<T>(ptr: *mut T, len: usize) -> Result<(), MemoryError> {
     #[cfg(unix)]
     {
-        unix::mprotect(ptr, len, libc::PROT_READ | libc::PROT_WRITE)
+        unix::mprotect(ptr, len, PROT_READ | PROT_WRITE)
     }
 
     #[cfg(windows)]
@@ -280,5 +287,5 @@ pub fn mem_unlock<T>(ptr: *mut T, len: usize) -> Result<(), MemoryError> {
 
 #[cfg(target_os = "linux")]
 pub fn mem_no_dump<T>(ptr: *mut T, len: usize) -> Result<(), MemoryError> {
-    unix::madvice(ptr as *mut libc::c_void, len, libc::MADV_DONTDUMP)
+    unix::madvice(ptr as *mut c_void, len, MADV_DONTDUMP)
 }
