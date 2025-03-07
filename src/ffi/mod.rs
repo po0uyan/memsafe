@@ -1,14 +1,12 @@
 use crate::MemoryError;
 
 #[cfg(unix)]
-pub mod unix;
+mod unix;
 
 #[cfg(windows)]
-pub mod win;
+mod win;
 #[cfg(windows)]
-use winapi::um::winnt::{
-    MEM_COMMIT, MEM_DECOMMIT, MEM_RESERVE, PAGE_NOACCESS, PAGE_READONLY, PAGE_READWRITE,
-};
+use winapi::um::winnt::{MEM_COMMIT, MEM_DECOMMIT, MEM_RESERVE, PAGE_READONLY, PAGE_READWRITE};
 
 /// Allocates page-alined memory dynamically.
 ///
@@ -123,16 +121,9 @@ pub fn mem_dealloc<T>(ptr: *mut T, len: usize) -> Result<(), MemoryError> {
 /// * `len` must be correct, matching the size of the allocated region.
 /// * Accessing the memory after calling this function will trigger a segmentation fault (Unix) or
 ///   access violation (Windows).
+#[cfg(unix)]
 pub fn mem_noaccess<T>(ptr: *mut T, len: usize) -> Result<(), MemoryError> {
-    #[cfg(unix)]
-    {
-        unix::mprotect(ptr, len, libc::PROT_NONE)
-    }
-
-    #[cfg(windows)]
-    {
-        win::virtual_protect(ptr, len, PAGE_NOACCESS, &mut 0)
-    }
+    unix::mprotect(ptr, len, libc::PROT_NONE)
 }
 
 /// Marks a memory region as read-only.
@@ -228,7 +219,7 @@ pub fn mem_readwrite<T>(ptr: *mut T, len: usize) -> Result<(), MemoryError> {
 ///
 /// * **Unix**: Uses `mlock`, which prevents the specified memory range from being swapped out.
 /// * **Windows**: Uses `VirtualLock`, which locks the memory in RAM and prevents paging.
-///   - **Windows Limitation**: 
+///   - **Windows Limitation**:
 ///     - All pages in the specified region must be committed.
 ///     - Memory protected with `PAGE_NOACCESS` cannot be locked.
 ///
@@ -285,4 +276,9 @@ pub fn mem_unlock<T>(ptr: *mut T, len: usize) -> Result<(), MemoryError> {
     {
         win::virtual_unlock(ptr, len)
     }
+}
+
+#[cfg(target_os = "linux")]
+pub fn mem_no_dump<T>(ptr: *mut T, len: usize) -> Result<(), MemoryError> {
+    unix::madvice(ptr as *mut libc::c_void, len, libc::MADV_DONTDUMP)
 }
