@@ -122,7 +122,7 @@ impl<T> MemSafe<T, NoAccess> {
 impl<T> MemSafe<T, ReadOnly> {
     /// Allocates a new instance of `T` in locked memory with read-only permissions (only available in Windows).
     #[cfg(windows)]
-    pub fn new(value: T) -> Result<Self, MemoryError> {
+    pub fn new(mut value: T) -> Result<Self, MemoryError> {
         // Windows doesn't allow for no access locked memory. So, the memory is kept readonly
         // in Windows. See more in following link:
         // https://learn.microsoft.com/en-us/windows/win32/api/memoryapi/nf-memoryapi-virtuallock#remarks
