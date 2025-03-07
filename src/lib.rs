@@ -66,8 +66,10 @@ pub struct MemSafe<T, State = ReadOnly> {
     _state: PhantomData<State>,
 }
 
+#[cfg(unix)]
 unsafe impl<T> Sync for MemSafe<T, NoAccess> where T: Sync {}
 unsafe impl<T> Sync for MemSafe<T, ReadOnly> where T: Sync {}
+#[cfg(unix)]
 unsafe impl<T> Send for MemSafe<T, NoAccess> where T: Send {}
 unsafe impl<T> Send for MemSafe<T, ReadOnly> where T: Send {}
 unsafe impl<T> Send for MemSafe<T, ReadWrite> where T: Send {}
@@ -131,7 +133,6 @@ impl<T> MemSafe<T, ReadOnly> {
         mem_readonly(ptr, len)?;
         Ok(MemSafe {
             ptr,
-            len,
             _state: Default::default(),
         })
     }
