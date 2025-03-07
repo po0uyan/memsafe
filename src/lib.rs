@@ -94,7 +94,7 @@ impl<T> MemSafe<T, NoAccess> {
         Ok(self)
     }
 
-    // Changes the memory state to `ReadOnly`.
+    // Changes the memory state from `NoAccess` to `ReadOnly`.
     pub fn read_only(self) -> Result<MemSafe<T, ReadOnly>, MemoryError> {
         mem_readonly(self.ptr, Self::len())?;
         let new_self = MemSafe {
@@ -105,7 +105,7 @@ impl<T> MemSafe<T, NoAccess> {
         Ok(new_self)
     }
 
-    /// Changes the memory state to `ReadWrite`.
+    /// Changes the memory state from `NoAccess` to `ReadWrite`.
     pub fn read_write(self) -> Result<MemSafe<T, ReadWrite>, MemoryError> {
         mem_readwrite(self.ptr, Self::len())?;
         let new_self = MemSafe {
@@ -135,7 +135,7 @@ impl<T> MemSafe<T, ReadOnly> {
             _state: Default::default(),
         })
     }
-    /// Changes the memory state to `NoAccess`.
+    /// Changes the memory state from `ReadOnly` to `NoAccess`.
     #[cfg(unix)]
     pub fn no_access(self) -> Result<MemSafe<T, NoAccess>, MemoryError> {
         mem_noaccess(self.ptr, Self::len())?;
@@ -152,7 +152,7 @@ impl<T> MemSafe<T, ReadOnly> {
         Ok(self)
     }
 
-    /// Changes the memory state to `ReadWrite`.
+    /// Changes the memory state from `ReadOnly` to `ReadWrite`.
     pub fn read_write(self) -> Result<MemSafe<T, ReadWrite>, MemoryError> {
         mem_readwrite(self.ptr, Self::len())?;
         let new_self = MemSafe {
@@ -165,7 +165,7 @@ impl<T> MemSafe<T, ReadOnly> {
 }
 
 impl<T> MemSafe<T, ReadWrite> {
-    /// Changes the memory state to `NoAccess`.
+    /// Changes the memory state from `ReadWrite` to `NoAccess`.
     #[cfg(unix)]
     pub fn no_access(self) -> Result<MemSafe<T, NoAccess>, MemoryError> {
         mem_noaccess(self.ptr, Self::len())?;
@@ -177,7 +177,7 @@ impl<T> MemSafe<T, ReadWrite> {
         Ok(new_self)
     }
 
-    /// Changes the memory state to `ReadOnly`.
+    /// Changes the memory state from `ReadWrite` to `ReadOnly`.
     pub fn read_only(self) -> Result<MemSafe<T, ReadOnly>, MemoryError> {
         mem_readonly(self.ptr, Self::len())?;
         let new_self = MemSafe {
