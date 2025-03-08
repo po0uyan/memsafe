@@ -24,10 +24,9 @@ println!("Secure data: {}", *secret);
 - **Cross-Platform**: Supports Unix (via `libc`) and Windows (via `winapi`) with optional dependencies.
 
 ## Installation
-Add to your `Cargo.toml`:
-```toml
-[dependencies]
-memsafe = "0.1.9"
+Run the following in the root of your project:
+```shell
+cargo add memsafe
 ```
 
 ## Security Mechanisms: A Deep Dive for Technical Enthusiasts
