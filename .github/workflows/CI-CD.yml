@@ -250,6 +250,7 @@ jobs:
           git commit -m "Bumping version to ${{ env.NEW_VERSION }} for release 🚀 [skip ci]"
           git push origin main
 
+
       - name: Tag version and push
         env:
           RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN }}
