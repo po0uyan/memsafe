@@ -184,7 +184,7 @@ jobs:
 
       - name: Extract PR Number from Merge Commit
         run: |
-          PR_NUMBER=$(git log -1 --pretty=%B | grep -oE 'Merge pull request #[0-9]+' | awk '{print $4}')
+          PR_NUMBER=$(git log -1 --pretty=%B | grep -oE 'Merge pull request #[0-9]+' | awk '{print $4}' | tr -d '#')
 
           if [ -z "$PR_NUMBER" ]; then
             echo "❌ Error: Could not determine PR number!"
