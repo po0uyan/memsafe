@@ -36,6 +36,7 @@ pub fn mlock<T>(ptr: *mut T, len: usize) -> Result<(), MemoryError> {
 
 /// Wrapper over `madvice`. Full documentation here:
 /// https://learn.microsoft.com/en-us/windows/win32/api/memoryapi/nf-memoryapi-virtualunlock
+#[cfg(target_os = "linux")]
 pub fn madvice<T>(ptr: *mut T, len: usize, advice: i32) -> Result<(), MemoryError> {
     if unsafe { libc::madvise(ptr as *mut libc::c_void, len, advice) } != 0 {
         Err(MemoryError(std::io::Error::last_os_error()))

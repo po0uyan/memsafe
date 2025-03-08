@@ -24,7 +24,6 @@ pub fn virtual_alloc<T>(
 /// Wrapper over `VirtualFree`. Full documentation here:
 /// https://learn.microsoft.com/en-us/windows/win32/api/memoryapi/nf-memoryapi-virtualfree
 pub fn virtual_free<T>(ptr: *mut T, len: usize, free_type: u32) -> Result<(), MemoryError> {
-    println!("fre");
     if unsafe { VirtualFree(ptr as *mut _, len, free_type) } == 0 {
         Err(MemoryError(std::io::Error::last_os_error()))
     } else {

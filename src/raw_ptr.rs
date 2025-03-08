@@ -1,10 +1,9 @@
-
 pub fn ptr_write<T>(ptr: *mut T, val: T) {
     unsafe { ptr.write(val) };
 }
 
-pub fn ptr_write_bytes<T>(ptr: *mut T, val: u8, count: usize) {
-    unsafe { ptr.write_bytes(val, count) };
+pub fn ptr_fill_zero<T>(ptr: *mut T) {
+    unsafe { ptr.write_bytes(0, 1) };
 }
 
 pub fn ptr_deref<'a, T>(ptr: *const T) -> &'a T {
