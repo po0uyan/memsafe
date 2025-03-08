@@ -12,7 +12,7 @@ use ffi::mem_no_dump;
 #[cfg(unix)]
 use ffi::mem_noaccess;
 use ffi::{mem_alloc, mem_dealloc, mem_lock, mem_readonly, mem_readwrite, mem_unlock};
-use raw_ptr::{ptr_deref, ptr_deref_mut, ptr_drop_in_place, ptr_fill_zero};
+use raw_ptr::{ptr_deref, ptr_deref_mut, ptr_drop_in_place, ptr_fill_zero, ptr_write};
 
 #[derive(Debug)]
 pub struct MemoryError(io::Error);
@@ -77,13 +77,13 @@ unsafe impl<T> Send for MemSafe<T, ReadWrite> where T: Send {}
 #[cfg(unix)]
 impl<T> MemSafe<T, NoAccess> {
     /// Allocates a new instance of `T` in locked memory with no access permissions.
-    pub fn new(mut value: T) -> Result<Self, MemoryError> {
+    pub fn new(value: T) -> Result<Self, MemoryError> {
         let len = std::mem::size_of::<T>();
         let ptr = mem_alloc(len)?;
         mem_lock(ptr, len)?;
         #[cfg(target_os = "linux")]
         mem_no_dump(ptr, len)?;
-        std::mem::swap(ptr_deref_mut(ptr), &mut value);
+        ptr_write(ptr, value);
         mem_noaccess(ptr, len)?;
         Ok(MemSafe {
             ptr,
@@ -129,7 +129,7 @@ impl<T> MemSafe<T, ReadOnly> {
         let len = std::mem::size_of::<T>();
         let ptr = mem_alloc(len)?;
         mem_lock(ptr, len)?;
-        std::mem::swap(ptr_deref_mut(ptr), &mut value);
+        ptr_write(ptr, value);
         mem_readonly(ptr, len)?;
         Ok(MemSafe {
             ptr,

@@ -1,3 +1,7 @@
+pub fn ptr_write<T>(ptr: *mut T, val: T) {
+    unsafe { ptr.write(val) };
+}
+
 pub fn ptr_fill_zero<T>(ptr: *mut T) {
     unsafe { ptr.write_bytes(0, 1) };
 }
