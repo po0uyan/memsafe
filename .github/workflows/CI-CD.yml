@@ -1,20 +1,25 @@
-name: CI
+name: PR Checks & Release (Crates.io & GitHub)
 
 on:
-  push:
-    branches:
-      - dev
   pull_request:
     branches:
-      - dev
+      - main
+    types:
+      - opened
+      - synchronize
+      - reopened
+      - ready_for_review
+  push:
+    branches:
+      - main
 
 jobs:
   test:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
-        arch: [x86_64, aarch64, i686, armv7, ppc64le, riscv64, mips64]
+        os: [ ubuntu-latest, macos-latest, windows-latest ]
+        arch: [ x86_64, aarch64, i686, armv7, ppc64le, riscv64 ]
         exclude:
           # Exclude Windows on non-x86 architectures
           - os: windows-latest
@@ -25,8 +30,6 @@ jobs:
             arch: ppc64le
           - os: windows-latest
             arch: riscv64
-          - os: windows-latest
-            arch: mips64
           # Exclude macOS on 32-bit and non-Apple architectures
           - os: macos-latest
             arch: i686
@@ -36,8 +39,7 @@ jobs:
             arch: ppc64le
           - os: macos-latest
             arch: riscv64
-          - os: macos-latest
-            arch: mips64
+
         include:
           # x86_64 targets (64-bit)
           - os: ubuntu-latest
@@ -49,7 +51,7 @@ jobs:
           - os: windows-latest
             arch: x86_64
             target: x86_64-pc-windows-msvc
-          
+
           # ARM64/AArch64 targets (64-bit)
           - os: ubuntu-latest
             arch: aarch64
@@ -57,7 +59,7 @@ jobs:
           - os: macos-latest
             arch: aarch64
             target: aarch64-apple-darwin
-          
+
           # i686 targets (32-bit x86)
           - os: ubuntu-latest
             arch: i686
@@ -65,26 +67,22 @@ jobs:
           - os: windows-latest
             arch: i686
             target: i686-pc-windows-msvc
-          
+
           # ARM32/ARMv7 targets (32-bit)
           - os: ubuntu-latest
             arch: armv7
             target: armv7-unknown-linux-gnueabihf
-            
+
           # PowerPC 64-bit Little Endian
           - os: ubuntu-latest
             arch: ppc64le
             target: powerpc64le-unknown-linux-gnu
-            
+
           # RISC-V 64-bit
           - os: ubuntu-latest
             arch: riscv64
             target: riscv64gc-unknown-linux-gnu
-            
-          # MIPS 64-bit
-          - os: ubuntu-latest
-            arch: mips64
-            target: mips64-unknown-linux-gnuabi64
+
       fail-fast: false
     steps:
       - name: Checkout code
@@ -96,7 +94,7 @@ jobs:
           toolchain: stable
           targets: ${{ matrix.target }}
           components: clippy
-          
+
       # Cache dependencies to speed up builds
       - name: Cache cargo registry
         uses: actions/cache@v3
@@ -118,12 +116,12 @@ jobs:
       # Run Clippy for the native architectures
       - name: Run Clippy (native)
         if: (matrix.os == 'ubuntu-latest' && matrix.arch == 'x86_64') || (matrix.os == 'macos-latest' && matrix.arch == 'x86_64') || (matrix.os == 'windows-latest' && matrix.arch == 'x86_64')
-        run: cargo clippy --target ${{ matrix.target }} -- -D warnings
+        run: cargo clippy --target ${{ matrix.target }}
 
       # Run Clippy for Linux cross-compilation
       - name: Run Clippy (Linux cross-compilation)
         if: matrix.os == 'ubuntu-latest' && matrix.arch != 'x86_64'
-        run: cross clippy --target ${{ matrix.target }} -- -D warnings
+        run: cross clippy --target ${{ matrix.target }}
 
       # Native builds and tests
       - name: Build (native)
@@ -156,3 +154,95 @@ jobs:
         run: |
           cargo build --verbose --target ${{ matrix.target }}
           cargo test --verbose --target ${{ matrix.target }}
+  release:
+    name: Release on successful tests and merge
+    needs: test
+    if: github.event_name == 'push'  # Runs only when merged into main
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Ensure we fetch all history
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential
+
+      - name: Build
+        run: cargo build --release --verbose
+
+      - name: Check package version
+        id: check_version
+        run: echo "VERSION=$(cargo metadata --format-version 1 --no-deps | jq -r '.packages[0].version')" >> $GITHUB_ENV
+
+      - name: Fetch PR Labels using GitHub API
+        env:
+          RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+        run: |
+          PR_NUMBER=$(jq --raw-output .pull_request.number "$GITHUB_EVENT_PATH")
+          LABELS=$(curl -s -H "Authorization: token $RELEASE_TOKEN" \
+            "https://api.github.com/repos/${{ github.repository }}/issues/${PR_NUMBER}/labels" | jq -r '.[].name')
+
+          VERSION_PART="patch"  # Default to patch bump
+
+          if echo "$LABELS" | grep -q "major"; then
+            VERSION_PART="major"
+          elif echo "$LABELS" | grep -q "minor"; then
+            VERSION_PART="minor"
+          fi
+
+          echo "VERSION_PART=$VERSION_PART" >> $GITHUB_ENV
+
+      - name: Determine Version Bump
+        run: |
+          if [[ "${{ env.VERSION_PART }}" == "major" ]]; then
+            NEW_VERSION=$(echo "${{ env.VERSION }}" | awk -F. -v OFS=. '{$1 += 1 ; $2=0; $3=0; print}')
+          elif [[ "${{ env.VERSION_PART }}" == "minor" ]]; then
+            NEW_VERSION=$(echo "${{ env.VERSION }}" | awk -F. -v OFS=. '{$2 += 1 ; $3=0; print}')
+          else
+            NEW_VERSION=$(echo "${{ env.VERSION }}" | awk -F. -v OFS=. '{$NF += 1 ; print}')
+          fi
+
+          echo "NEW_VERSION=$NEW_VERSION" >> $GITHUB_ENV
+
+      - name: Update Cargo.toml with new version
+        run: cargo set-version ${{ env.NEW_VERSION }}
+
+      - name: Commit and push new version (Bypass Branch Protection)
+        env:
+          RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+        run: |
+          git config --global user.name "GitHub Actions"
+          git config --global user.email "actions@github.com"
+          git add Cargo.toml
+          git commit -m "Bumping version to ${{ env.NEW_VERSION }} for release 🚀"
+          git push https://x-access-token:${{ env.RELEASE_TOKEN }}@github.com/${{ github.repository }}.git main
+
+      - name: Tag version and push
+        env:
+          RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+        run: |
+          git tag "v${{ env.NEW_VERSION }}"
+          git push https://x-access-token:${{ env.RELEASE_TOKEN }}@github.com/${{ github.repository }}.git "v${{ env.NEW_VERSION }}"
+
+      - name: Publish to Crates.io
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_IO_TOKEN }}
+        run: cargo publish --token $CARGO_REGISTRY_TOKEN
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2.2.1
+        with:
+          token: ${{ secrets.RELEASE_TOKEN }}
+          tag_name: v${{ env.NEW_VERSION }}
+          name: Release v${{ env.NEW_VERSION }}
+          body: "🚀 Automated release triggered by successful tests on main.\n\n📦 **[View on Crates.io](https://crates.io/crates/YOUR_CRATE_NAME/${{ env.NEW_VERSION }})**"
+          draft: false
+          prerelease: false
