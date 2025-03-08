@@ -77,13 +77,15 @@ unsafe impl<T> Send for MemSafe<T, ReadWrite> where T: Send {}
 #[cfg(unix)]
 impl<T> MemSafe<T, NoAccess> {
     /// Allocates a new instance of `T` in locked memory with no access permissions.
-    pub fn new(value: T) -> Result<Self, MemoryError> {
+    pub fn new(mut value: T) -> Result<Self, MemoryError> {
         let len = std::mem::size_of::<T>();
         let ptr = mem_alloc(len)?;
         mem_lock(ptr, len)?;
         #[cfg(target_os = "linux")]
         mem_no_dump(ptr, len)?;
+        let val_ptr = &mut value as *mut T;
         ptr_write(ptr, value);
+        ptr_fill_zero(val_ptr);
         mem_noaccess(ptr, len)?;
         Ok(MemSafe {
             ptr,
@@ -129,7 +131,9 @@ impl<T> MemSafe<T, ReadOnly> {
         let len = std::mem::size_of::<T>();
         let ptr = mem_alloc(len)?;
         mem_lock(ptr, len)?;
+        let val_ptr = &mut value as *mut T;
         ptr_write(ptr, value);
+        ptr_fill_zero(val_ptr);
         mem_readonly(ptr, len)?;
         Ok(MemSafe {
             ptr,
