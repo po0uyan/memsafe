@@ -256,7 +256,7 @@ jobs:
           RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN }}
         run: |
           git tag "v${{ env.NEW_VERSION }}"
-          git push "v${{ env.NEW_VERSION }}"
+          git push origin "v${{ env.NEW_VERSION }}"
 
       - name: Publish to Crates.io
         env:
