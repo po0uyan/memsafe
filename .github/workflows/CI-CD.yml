@@ -182,19 +182,36 @@ jobs:
         id: check_version
         run: echo "VERSION=$(cargo metadata --format-version 1 --no-deps | jq -r '.packages[0].version')" >> $GITHUB_ENV
 
-      - name: Fetch PR Labels using GitHub API
+      - name: Extract PR Number from Merge Commit
+        run: |
+          PR_NUMBER=$(git log -1 --pretty=%B | grep -oE 'Merge pull request #[0-9]+' | awk '{print $4}')
+
+          if [ -z "$PR_NUMBER" ]; then
+            echo "❌ Error: Could not determine PR number!"
+            exit 1
+          fi
+
+          echo "✅ Extracted PR Number: $PR_NUMBER"
+          echo "PR_NUMBER=$PR_NUMBER" >> $GITHUB_ENV
+
+      - name: Fetch PR Labels Using GitHub API
         env:
           RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN }}
         run: |
-          PR_NUMBER="${{ github.event.pull_request.number }}"
+          PR_NUMBER="${{ env.PR_NUMBER }}"
+          
           LABELS_JSON=$(curl -s -H "Authorization: token $RELEASE_TOKEN" \
             "https://api.github.com/repos/${{ github.repository }}/issues/${PR_NUMBER}/labels")
           
-          # Extract only the names of labels and store them as a space-separated string
+          echo "✅ PR Labels JSON: $LABELS_JSON"
+          
+          # Extract labels into a space-separated string
           LABELS=$(echo "$LABELS_JSON" | jq -r 'map(.name) | join(" ")')
           
-          # Default to patch bump
-          VERSION_PART="patch"
+          echo "✅ PR Labels: $LABELS"
+          
+          # Determine version bump priority: major > minor > patch
+          VERSION_PART="patch"  # Default to patch
           
           if echo "$LABELS" | grep -iq "major"; then
             VERSION_PART="major"
@@ -202,7 +219,9 @@ jobs:
             VERSION_PART="minor"
           fi
           
+          echo "✅ Selected Version Bump: $VERSION_PART"
           echo "VERSION_PART=$VERSION_PART" >> $GITHUB_ENV
+          
 
       - name: Determine Version Bump
         run: |
@@ -247,6 +266,6 @@ jobs:
           token: ${{ secrets.RELEASE_TOKEN }}
           tag_name: v${{ env.NEW_VERSION }}
           name: Release v${{ env.NEW_VERSION }}
-          body: "🚀 Automated release triggered by successful tests on main.\n\n📦 **[View on Crates.io](https://crates.io/crates/YOUR_CRATE_NAME/${{ env.NEW_VERSION }})**"
+          body: "🚀 Automated release triggered by successful tests on main.\n\n📦 **[View on Crates.io](https://crates.io/crates/memsafe/${{ env.NEW_VERSION }})**"
           draft: false
           prerelease: false
