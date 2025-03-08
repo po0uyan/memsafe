@@ -186,7 +186,7 @@ jobs:
         env:
           RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN }}
         run: |
-          PR_NUMBER=$(jq --raw-output .pull_request.number "$GITHUB_EVENT_PATH")
+          PR_NUMBER="${{ github.event.pull_request.number }}"
           LABELS_JSON=$(curl -s -H "Authorization: token $RELEASE_TOKEN" \
             "https://api.github.com/repos/${{ github.repository }}/issues/${PR_NUMBER}/labels")
           
