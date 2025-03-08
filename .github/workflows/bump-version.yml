@@ -1,0 +1,105 @@
+name: Bump Version
+
+on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: 'Version bump type'
+        required: true
+        default: 'patch'
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+      dry-run:
+        description: 'Dry run (no changes will be committed)'
+        required: false
+        type: boolean
+        default: false
+
+jobs:
+  bump-version:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.RELEASE_TOKEN }}
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+
+      - name: Install cargo-release
+        run: cargo install cargo-release
+
+      - name: Configure Git
+        run: |
+          git config --global user.name "GitHub Actions"
+          git config --global user.email "actions@github.com"
+
+      - name: Extract current version
+        id: current_version
+        run: |
+          CURRENT_VERSION=$(grep '^version =' Cargo.toml | sed 's/version = "\(.*\)"/\1/')
+          echo "value=$CURRENT_VERSION" >> $GITHUB_OUTPUT
+          echo "Current version in Cargo.toml: $CURRENT_VERSION"
+
+      - name: Dry run version bump
+        if: ${{ inputs.dry-run }}
+        run: |
+          cargo release ${{ github.event.inputs.bump }} --no-publish --dry-run --verbose
+          
+          # Simulate what the new version would be based on semver rules
+          CURRENT_VERSION="${{ steps.current_version.outputs.value }}"
+          IFS='.' read -r -a VERSION_PARTS <<< "$CURRENT_VERSION"
+          
+          MAJOR=${VERSION_PARTS[0]}
+          MINOR=${VERSION_PARTS[1]}
+          PATCH=${VERSION_PARTS[2]}
+          
+          case ${{ github.event.inputs.bump }} in
+            major)
+              NEW_VERSION="$((MAJOR + 1)).0.0"
+              ;;
+            minor)
+              NEW_VERSION="$MAJOR.$((MINOR + 1)).0"
+              ;;
+            patch)
+              NEW_VERSION="$MAJOR.$MINOR.$((PATCH + 1))"
+              ;;
+          esac
+          
+          echo "Would update README.MD from version $CURRENT_VERSION to $NEW_VERSION"
+
+      - name: Execute version bump
+        if: ${{ !inputs.dry-run }}
+        run: |
+          # Store the current version before bumping
+          CURRENT_VERSION="${{ steps.current_version.outputs.value }}"
+          echo "Current version: $CURRENT_VERSION"
+          
+          # First run cargo-release to update Cargo.toml
+          cargo release ${{ github.event.inputs.bump }} --execute --no-confirm --no-publish --no-push
+          
+          # Get the new version after cargo-release updated it
+          NEW_VERSION=$(grep '^version =' Cargo.toml | sed 's/version = "\(.*\)"/\1/')
+          echo "New version in Cargo.toml: $NEW_VERSION"
+          
+          # Update version in README.MD - using regex pattern that matches version numbers
+          # First, create a safe version of the current version for regex use
+          CURRENT_VERSION_REGEX=$(echo "$CURRENT_VERSION" | sed 's/\./\\./g')
+          
+          # Look for version numbers in the README and replace them
+          sed -i "s/$CURRENT_VERSION_REGEX/$NEW_VERSION/g" README.MD
+          
+          # Add the README change to the commit
+          git add README.MD
+          git commit --amend --no-edit
+
+      - name: Push changes
+        if: ${{ !inputs.dry-run }}
+        run: git push --follow-tags 
