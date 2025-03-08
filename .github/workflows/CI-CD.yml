@@ -187,17 +187,21 @@ jobs:
           RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN }}
         run: |
           PR_NUMBER=$(jq --raw-output .pull_request.number "$GITHUB_EVENT_PATH")
-          LABELS=$(curl -s -H "Authorization: token $RELEASE_TOKEN" \
-            "https://api.github.com/repos/${{ github.repository }}/issues/${PR_NUMBER}/labels" | jq -r '.[].name')
-
-          VERSION_PART="patch"  # Default to patch bump
-
-          if echo "$LABELS" | grep -q "major"; then
+          LABELS_JSON=$(curl -s -H "Authorization: token $RELEASE_TOKEN" \
+            "https://api.github.com/repos/${{ github.repository }}/issues/${PR_NUMBER}/labels")
+          
+          # Extract only the names of labels and store them as a space-separated string
+          LABELS=$(echo "$LABELS_JSON" | jq -r 'map(.name) | join(" ")')
+          
+          # Default to patch bump
+          VERSION_PART="patch"
+          
+          if echo "$LABELS" | grep -iq "major"; then
             VERSION_PART="major"
-          elif echo "$LABELS" | grep -q "minor"; then
+          elif echo "$LABELS" | grep -iq "minor"; then
             VERSION_PART="minor"
           fi
-
+          
           echo "VERSION_PART=$VERSION_PART" >> $GITHUB_ENV
 
       - name: Determine Version Bump
