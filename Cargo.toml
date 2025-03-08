@@ -1,10 +1,8 @@
 [package]
 name = "memsafe"
-version = "0.1.9"
-
-
+version = "0.2.1"
 edition = "2021"
-description = "A cross-platform Rust library for securely wrapping data in memory"
+description = "A Secure cross-platform Rust library for securely wrapping data in memory"
 authors = [
     "po0uyan <info@pouyan.me>",
     "mortezashojaei <mshojaei179@gmail.com>",
@@ -14,6 +12,7 @@ license = "MIT"
 repository = "https://github.com/po0uyan/memsafe"
 keywords = ["memory", "security", "lock", "cross-platform"]
 categories = ["memory-management", "os", "cryptography"]
+readme = "README.MD"
 
 [target.'cfg(unix)'.dependencies]
 libc = { version = "0.2" }

@@ -6,9 +6,14 @@ pub fn mmap<T>(
     prot: i32,
     flags: i32,
     fd: i32,
-    offset: i64,
+    offset: isize,
 ) -> Result<*mut T, MemoryError> {
-    let ptr = unsafe { libc::mmap(std::ptr::null_mut(), len, prot, flags, fd, offset) };
+    let mmap_offset = if cfg!(target_pointer_width = "32") {
+        offset as i32 as libc::off_t
+    } else {
+        offset as libc::off_t  // Default to i64 for other architectures
+    };
+    let ptr = unsafe { libc::mmap(std::ptr::null_mut(), len, prot, flags, fd, mmap_offset) };
     if ptr == libc::MAP_FAILED {
         Err(MemoryError(std::io::Error::last_os_error()))
     } else {
