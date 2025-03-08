@@ -163,6 +163,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
+          ssh-key: ${{ secrets.DEPLOY_KEY }}
           fetch-depth: 0  # Ensure we fetch all history
 
       - name: Set up Rust
@@ -247,14 +248,14 @@ jobs:
           git config --global user.email "actions@github.com"
           git add Cargo.toml
           git commit -m "Bumping version to ${{ env.NEW_VERSION }} for release 🚀"
-          git push https://x-access-token:${{ env.RELEASE_TOKEN }}@github.com/${{ github.repository }}.git main
+          git push main
 
       - name: Tag version and push
         env:
           RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN }}
         run: |
           git tag "v${{ env.NEW_VERSION }}"
-          git push https://x-access-token:${{ env.RELEASE_TOKEN }}@github.com/${{ github.repository }}.git "v${{ env.NEW_VERSION }}"
+          git push "v${{ env.NEW_VERSION }}"
 
       - name: Publish to Crates.io
         env:
