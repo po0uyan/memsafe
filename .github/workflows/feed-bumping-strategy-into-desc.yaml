@@ -1,0 +1,72 @@
+name: Update PR Description Based on Bump Strategy Labels
+
+on:
+  pull_request:
+    types:
+      - labeled
+      - unlabeled  # Runs when a label is added or removed from a PR
+
+jobs:
+  update-pr-description:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check PR Target Branch
+        env:
+          BASE_BRANCH: ${{ github.event.pull_request.base.ref }}
+        run: |
+          if [ "$BASE_BRANCH" != "main" ]; then
+            echo "❌ Skipping: PR is targeting '$BASE_BRANCH' instead of 'main'."
+            exit 0
+          fi
+
+      - name: Fetch PR Details
+        env:
+          RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+        run: |
+          PR_NUMBER=${{ github.event.pull_request.number }}
+          PR_API_URL="https://api.github.com/repos/${{ github.repository }}/pulls/${PR_NUMBER}"
+          
+          # Get the current PR description
+          CURRENT_BODY=$(curl -s -H "Authorization: token $RELEASE_TOKEN" "$PR_API_URL" | jq -r '.body')
+
+          echo "✅ PR Number: $PR_NUMBER"
+          echo "✅ Target Branch: main"
+          echo "✅ Current PR Description: $CURRENT_BODY"
+
+          # Fetch all labels of the PR
+          LABELS_JSON=$(curl -s -H "Authorization: token $RELEASE_TOKEN" \
+            "https://api.github.com/repos/${{ github.repository }}/issues/${PR_NUMBER}/labels")
+
+          # Extract label names
+          LABELS=$(echo "$LABELS_JSON" | jq -r 'map(.name) | join(" ")')
+          echo "✅ PR Labels: $LABELS"
+
+          # Define allowed bump labels
+          BUMP_LABELS=("major" "minor" "patch")
+          SELECTED_BUMP=""
+
+          # Check if any bump label is present
+          for label in "${BUMP_LABELS[@]}"; do
+            if echo "$LABELS" | grep -iq "$label"; then
+              SELECTED_BUMP=$(echo "$label" | tr '[:lower:]' '[:upper:]')  # Convert to uppercase for formatting
+              break
+            fi
+          done
+
+          echo "✅ Selected Bump Label: $SELECTED_BUMP"
+
+          # Remove existing bump version from the PR description
+          UPDATED_BODY=$(echo "$CURRENT_BODY" | sed -E 's/\*\*Version bump:\*\* (MAJOR|MINOR|PATCH)//g' | sed '/^$/d')
+
+          # If a new bump is selected, add it to the description
+          if [ -n "$SELECTED_BUMP" ]; then
+            UPDATED_BODY="$UPDATED_BODY\n\n**Version bump:** $SELECTED_BUMP"
+          fi
+
+          echo "✅ Updated PR Description: $UPDATED_BODY"
+
+          # Update PR Description via API
+          curl -X PATCH -H "Authorization: token $RELEASE_TOKEN" \
+               -H "Content-Type: application/json" \
+               -d "{\"body\": \"$UPDATED_BODY\"}" "$PR_API_URL"
