@@ -175,7 +175,6 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential
-          cargo install cargo-edit
 
       - name: Build
         run: cargo build --release --verbose
@@ -238,7 +237,7 @@ jobs:
           echo "NEW_VERSION=$NEW_VERSION" >> $GITHUB_ENV
 
       - name: Update Cargo.toml with new version
-        run: cargo set-version ${{ env.NEW_VERSION }}
+        run: sed -i 's/^version = "[0-9]\+\.[0-9]\+\.[0-9]\+"/version = "${{ env.NEW_VERSION }}"/' Cargo.toml
 
       - name: Commit and push new version (Bypass Branch Protection)
         env:
