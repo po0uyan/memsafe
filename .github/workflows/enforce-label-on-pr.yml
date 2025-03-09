@@ -40,6 +40,8 @@ jobs:
 
       - name: Auto-Comment on PR if Missing Labels
         if: failure()
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
         run: |
           COMMENT="⚠️ **PR Validation Failed**: This PR is missing a required label. Please add one of: **minor, major, patch**."
           curl -s -H "Authorization: token $GH_TOKEN" -X POST \
