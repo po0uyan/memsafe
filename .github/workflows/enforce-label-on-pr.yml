@@ -54,4 +54,4 @@ jobs:
                -H "Accept: application/vnd.github.v3+json" \
                -X POST \
                -d "{\"body\":\"$COMMENT\"}" \
-               "$API_URL".github.com/repos/$REPO/issues/$PR_NUMBER/comments"
+               "$API_URL"
