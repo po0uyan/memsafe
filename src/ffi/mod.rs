@@ -1,14 +1,18 @@
 use crate::MemoryError;
 
 #[cfg(unix)]
-pub mod unix;
+mod unix;
+
+#[cfg(unix)]
+use libc::{MAP_ANONYMOUS, MAP_PRIVATE, PROT_NONE, PROT_READ, PROT_WRITE};
+
+#[cfg(target_os = "linux")]
+use libc::{c_void, MADV_DONTDUMP};
 
 #[cfg(windows)]
-pub mod win;
+mod win;
 #[cfg(windows)]
-use winapi::um::winnt::{
-    MEM_COMMIT, MEM_DECOMMIT, MEM_RESERVE, PAGE_NOACCESS, PAGE_READONLY, PAGE_READWRITE,
-};
+use winapi::um::winnt::{MEM_COMMIT, MEM_DECOMMIT, MEM_RESERVE, PAGE_READONLY, PAGE_READWRITE};
 
 /// Allocates page-alined memory dynamically.
 ///
@@ -40,8 +44,8 @@ pub fn mem_alloc<T>(len: usize) -> Result<*mut T, MemoryError> {
     {
         unix::mmap(
             len,
-            libc::PROT_READ | libc::PROT_WRITE,
-            libc::MAP_PRIVATE | libc::MAP_ANONYMOUS,
+            PROT_READ | PROT_WRITE,
+            MAP_PRIVATE | MAP_ANONYMOUS,
             -1,
             0,
         )
@@ -123,16 +127,10 @@ pub fn mem_dealloc<T>(ptr: *mut T, len: usize) -> Result<(), MemoryError> {
 /// * `len` must be correct, matching the size of the allocated region.
 /// * Accessing the memory after calling this function will trigger a segmentation fault (Unix) or
 ///   access violation (Windows).
+#[cfg(unix)]
 pub fn mem_noaccess<T>(ptr: *mut T, len: usize) -> Result<(), MemoryError> {
-    #[cfg(unix)]
-    {
-        unix::mprotect(ptr, len, libc::PROT_NONE)
-    }
 
-    #[cfg(windows)]
-    {
-        win::virtual_protect(ptr, len, PAGE_NOACCESS, &mut 0)
-    }
+    unix::mprotect(ptr, len, PROT_NONE)
 }
 
 /// Marks a memory region as read-only.
@@ -164,7 +162,7 @@ pub fn mem_noaccess<T>(ptr: *mut T, len: usize) -> Result<(), MemoryError> {
 pub fn mem_readonly<T>(ptr: *mut T, len: usize) -> Result<(), MemoryError> {
     #[cfg(unix)]
     {
-        unix::mprotect(ptr, len, libc::PROT_READ)
+        unix::mprotect(ptr, len, PROT_READ)
     }
 
     #[cfg(windows)]
@@ -200,7 +198,7 @@ pub fn mem_readonly<T>(ptr: *mut T, len: usize) -> Result<(), MemoryError> {
 pub fn mem_readwrite<T>(ptr: *mut T, len: usize) -> Result<(), MemoryError> {
     #[cfg(unix)]
     {
-        unix::mprotect(ptr, len, libc::PROT_READ | libc::PROT_WRITE)
+        unix::mprotect(ptr, len, PROT_READ | PROT_WRITE)
     }
 
     #[cfg(windows)]
@@ -228,7 +226,7 @@ pub fn mem_readwrite<T>(ptr: *mut T, len: usize) -> Result<(), MemoryError> {
 ///
 /// * **Unix**: Uses `mlock`, which prevents the specified memory range from being swapped out.
 /// * **Windows**: Uses `VirtualLock`, which locks the memory in RAM and prevents paging.
-///   - **Windows Limitation**: 
+///   - **Windows Limitation**:
 ///     - All pages in the specified region must be committed.
 ///     - Memory protected with `PAGE_NOACCESS` cannot be locked.
 ///
@@ -285,4 +283,9 @@ pub fn mem_unlock<T>(ptr: *mut T, len: usize) -> Result<(), MemoryError> {
     {
         win::virtual_unlock(ptr, len)
     }
+}
+
+#[cfg(target_os = "linux")]
+pub fn mem_no_dump<T>(ptr: *mut T, len: usize) -> Result<(), MemoryError> {
+    unix::madvice(ptr as *mut c_void, len, MADV_DONTDUMP)
 }
