@@ -40,8 +40,18 @@ jobs:
 
       - name: Auto-Comment on PR if Missing Labels
         if: failure()
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
         run: |
+          REPO="${{ github.repository }}"
+          PR_NUMBER="${{ github.event.pull_request.number }}"
           COMMENT="⚠️ **PR Validation Failed**: This PR is missing a required label. Please add one of: **minor, major, patch**."
-          curl -s -H "Authorization: token $GH_TOKEN" -X POST \
-            -d "{\"body\":\"$COMMENT\"}" \
-            "https://api.github.com/repos/$REPO/issues/$PR_NUMBER/comments"
+          API_URL="https://api.github.com/repos/$REPO/issues/$PR_NUMBER/comments"
+
+          echo "Posting comment to $API_URL"
+
+          curl -s -H "Authorization: token $GH_TOKEN" \
+               -H "Accept: application/vnd.github.v3+json" \
+               -X POST \
+               -d "{\"body\":\"$COMMENT\"}" \
+               "$API_URL"
