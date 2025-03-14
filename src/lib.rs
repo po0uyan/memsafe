@@ -1,5 +1,6 @@
 // src/lib.rs
 mod ffi;
+pub mod gaurd;
 mod raw_ptr;
 
 use std::convert::Infallible;

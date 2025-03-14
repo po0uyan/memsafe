@@ -11,6 +11,28 @@ mod memory_safety_tests {
 
     use super::*;
 
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn test_gaurd() {
+            let mut mem_safe = memsafe::gaurd::MemSafe::new([0_u8; 16]).unwrap();
+            {
+                let mut writer = mem_safe.write();
+                for i in 0..16 {
+                    writer[i] = i as u8;
+                }
+            }
+            {
+                let reader = mem_safe.read();
+                for i in 0..16 {
+                    assert_eq!(reader[i], i as u8);
+                }
+            }
+        }
+    }
+
     #[test]
     fn test_readme_example() {
         use memsafe::MemSafe;
