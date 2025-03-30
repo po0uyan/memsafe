@@ -56,11 +56,9 @@ impl<T> Cell<T> {
         ret
     }
 
+    #[cfg(unix)]
     pub fn no_access(&mut self) -> Result<(), MemoryError> {
-        #[cfg(unix)]
-        let ret = mem_noaccess(self.ptr, std::mem::size_of::<T>());
-
-        ret
+        mem_noaccess(self.ptr, std::mem::size_of::<T>())
     }
 
     pub fn read_only(&mut self) -> Result<(), MemoryError> {
