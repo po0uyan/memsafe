@@ -1,53 +1,12 @@
-use memsafe::MemSafe;
-
 /// Test suite for MemSafe functionality
 /// These tests verify the core functionality of the MemSafe wrapper
 #[cfg(test)]
 mod memory_safety_tests {
+    use memsafe::type_state::MemSafe;
     use std::{
         io::{Cursor, Read, Write},
         sync::Arc,
     };
-
-    use super::*;
-
-    #[cfg(test)]
-    mod tests {
-        use super::*;
-
-        #[test]
-        fn test_gaurd() {
-            let mut mem_safe = memsafe::gaurd::MemSafe::new([0_u8; 16]).unwrap();
-            {
-                let mut writer = mem_safe.write();
-                for i in 0..16 {
-                    writer[i] = i as u8;
-                }
-            }
-            {
-                let reader = mem_safe.read();
-                for i in 0..16 {
-                    assert_eq!(reader[i], i as u8);
-                }
-            }
-        }
-    }
-
-    #[test]
-    fn test_readme_example() {
-        use memsafe::MemSafe;
-        // initialize in an buffer in no access state
-        let secret = MemSafe::new([0_u8; 32]).unwrap();
-
-        // make array read-write and write into it
-        let info = "my-scret-info";
-        let mut secret = secret.read_write().unwrap();
-        secret[..info.len()].copy_from_slice(info.as_bytes());
-
-        // make array read only read from it
-        let secret = secret.read_only().unwrap();
-        println!("Secure data: {:02X?}", *secret);
-    }
 
     #[allow(unused_variables)]
     #[test]
