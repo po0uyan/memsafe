@@ -47,7 +47,7 @@ impl<T> Cell<T> {
     pub fn low_priv(&mut self) -> Result<(), MemoryError> {
         // lowest privilege on windows
         #[cfg(windows)]
-        let ret = self.readonly();
+        let ret = self.read_only();
 
         // lowest privilege on unix
         #[cfg(unix)]
