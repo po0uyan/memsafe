@@ -91,7 +91,7 @@ impl<T> MemSafe<T, NoAccess> {
 impl<T> MemSafe<T, ReadOnly> {
     /// Allocates a new instance of `T` in locked memory with read-only permissions (only available in Windows).
     #[cfg(windows)]
-    pub fn new(mut value: T) -> Result<Self, MemoryError> {
+    pub fn new(value: T) -> Result<Self, MemoryError> {
         Ok(MemSafe {
             cell: Cell::new(value)?,
             _state: Default::default(),
