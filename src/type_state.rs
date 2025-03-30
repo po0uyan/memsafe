@@ -55,16 +55,7 @@ unsafe impl<T> Send for MemSafe<T, ReadWrite> where T: Send {}
 #[cfg(unix)]
 impl<T> MemSafe<T, NoAccess> {
     /// Allocates a new instance of `T` in locked memory with no access permissions.
-    pub fn new(mut value: T) -> Result<Self, MemoryError> {
-        // let len = std::mem::size_of::<T>();
-        // let ptr = mem_alloc(len)?;
-        // mem_lock(ptr, len)?;
-        // #[cfg(target_os = "linux")]
-        // mem_no_dump(ptr, len)?;
-        // let val_ptr = &mut value as *mut T;
-        // ptr_write(ptr, value);
-        // ptr_fill_zero(val_ptr);
-        // mem_noaccess(ptr, len)?;
+    pub fn new(value: T) -> Result<Self, MemoryError> {
         Ok(MemSafe {
             cell: Cell::new(value)?,
             _state: Default::default(),
@@ -101,18 +92,8 @@ impl<T> MemSafe<T, ReadOnly> {
     /// Allocates a new instance of `T` in locked memory with read-only permissions (only available in Windows).
     #[cfg(windows)]
     pub fn new(mut value: T) -> Result<Self, MemoryError> {
-        // Windows doesn't allow for no access locked memory. So, the memory is kept readonly
-        // in Windows. See more in following link:
-        // https://learn.microsoft.com/en-us/windows/win32/api/memoryapi/nf-memoryapi-virtuallock#remarks
-        let len = std::mem::size_of::<T>();
-        let ptr = mem_alloc(len)?;
-        mem_lock(ptr, len)?;
-        let val_ptr = &mut value as *mut T;
-        ptr_write(ptr, value);
-        ptr_fill_zero(val_ptr);
-        mem_readonly(ptr, len)?;
         Ok(MemSafe {
-            ptr,
+            cell: Cell::new(value)?,
             _state: Default::default(),
         })
     }
@@ -171,12 +152,6 @@ impl<T> MemSafe<T, ReadWrite> {
     }
 }
 
-impl<T, S> MemSafe<T, S> {
-    const fn len() -> usize {
-        std::mem::size_of::<T>()
-    }
-}
-
 impl<T> Deref for MemSafe<T, ReadOnly> {
     type Target = T;
     fn deref(&self) -> &Self::Target {
@@ -214,13 +189,3 @@ impl<T> AsMut<T> for MemSafe<T, ReadWrite> {
         self.cell.deref_mut()
     }
 }
-
-// impl<T, State> Drop for MemSafe<T, State> {
-//     fn drop(&mut self) {
-//         mem_readwrite(self.cell, Self::len()).unwrap();
-//         ptr_drop_in_place(self.cell);
-//         ptr_fill_zero(self.cell);
-//         mem_unlock(self.cell, Self::len()).unwrap();
-//         mem_dealloc(self.cell, Self::len()).unwrap();
-//     }
-// }
