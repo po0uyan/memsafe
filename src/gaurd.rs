@@ -8,6 +8,8 @@ pub struct MemSafe<T> {
     cell: Cell<T>,
 }
 
+unsafe impl<T> Send for MemSafe<T> where T: Send {}
+
 impl<T> MemSafe<T> {
     pub fn new(value: T) -> Result<MemSafe<T>, MemoryError> {
         Ok(Self {
@@ -15,14 +17,14 @@ impl<T> MemSafe<T> {
         })
     }
 
-    pub fn read(&mut self) -> MemSafeRead<'_, T> {
-        self.cell.read_only();
-        MemSafeRead { mem_safe: self }
+    pub fn read(&mut self) -> Result<MemSafeRead<'_, T>, MemoryError> {
+        self.cell.read_only()?;
+        Ok(MemSafeRead { mem_safe: self })
     }
 
-    pub fn write(&mut self) -> MemSafeWrite<'_, T> {
-        self.cell.read_write();
-        MemSafeWrite { mem_safe: self }
+    pub fn write(&mut self) -> Result<MemSafeWrite<'_, T>, MemoryError> {
+        self.cell.read_write()?;
+        Ok(MemSafeWrite { mem_safe: self })
     }
 }
 
@@ -40,7 +42,7 @@ impl<T> Deref for MemSafeRead<'_, T> {
 
 impl<T> Drop for MemSafeRead<'_, T> {
     fn drop(&mut self) {
-        self.mem_safe.cell.low_priv();
+        self.mem_safe.cell.low_priv().unwrap();
     }
 }
 
@@ -64,6 +66,6 @@ impl<T> DerefMut for MemSafeWrite<'_, T> {
 
 impl<T> Drop for MemSafeWrite<'_, T> {
     fn drop(&mut self) {
-        self.mem_safe.cell.low_priv();
+        self.mem_safe.cell.low_priv().unwrap();
     }
 }
