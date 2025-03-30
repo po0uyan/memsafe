@@ -14,17 +14,20 @@ This is the official `memsafe` crate, hosted at [GitHub](https://github.com/po0u
 ```rust
 use memsafe::MemSafe;
 
-// initialize a 32-bytes buffer in no access state
-let secret = MemSafe::new([0_u8; 32]).unwrap();
+// allocate protected memory
+let mut secret = MemSafe::new([0_u8; 32]).unwrap();
 
-// make the buffer read-write and write into it
-let info = "my-scret-info";
-let mut secret = secret.read_write().unwrap();
-secret[..info.len()].copy_from_slice(info.as_bytes());
+// write into protected memory
+{
+    let mut write = secret.write().unwrap();
+    write[..14].copy_from_slice("my-secret-info".as_bytes());
+}
 
-// make array read only read from it
-let secret = secret.read_only().unwrap();
-println!("Secure data: {:02X?}", *secret);
+// read from protected memory
+{
+    let read = secret.read().unwrap();
+    println!("Secure data: {:02X?}", *read);
+}
 ```
 ## Features
 - **Memory Locking**: Prevents swapping to disk using `mlock` (Unix) or `VirtualLock` (Windows).
@@ -86,6 +89,3 @@ Licensed under the MIT License. See [LICENSE](LICENSE) for details.
 ## Contributing
 Issues and pull requests are welcome at [https://github.com/po0uyan/memsafe](https://github.com/po0uyan/memsafe).
 I'll be more than happy to merge enhancements! security updates and any steps towards making software world a better place for everyone.
-
-
-
