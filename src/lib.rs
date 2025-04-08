@@ -3,8 +3,8 @@ use error::MemoryError;
 mod cell;
 pub mod error;
 mod ffi;
-mod gaurd;
+mod mem_safe;
 mod ptr_ops;
 pub mod type_state;
 
-pub use gaurd::{MemSafe, MemSafeRead, MemSafeWrite};
+pub use mem_safe::{MemSafe, MemSafeRead, MemSafeWrite};
