@@ -1,7 +1,7 @@
 /// Test suite for MemSafe functionality
 /// These tests verify the core functionality of the MemSafe wrapper
 /// type-state an optional functionality to gain more control on memory states if needed
-#![cfg(feature = "type-state")]
+#[cfg(feature = "type-state")]
 #[cfg(test)]
 mod memory_safety_tests {
     use memsafe::type_state::MemSafe;
