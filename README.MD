@@ -29,6 +29,31 @@ let mut secret = MemSafe::new([0_u8; 32]).unwrap();
     println!("Secure data: {:02X?}", *read);
 }
 ```
+
+**🧓 A legacy type-state fan? Or craving more control?**
+If you’ve used memsafe before — yes, the type-state API is still here. We’ve just enhanced the default interface to be simpler and more ergonomic for everyday use.
+
+Enable it like this:
+```bash
+cargo add memsafe --features type-state
+```
+This gives you a compile-time-safe API where the buffer’s access state (read-only, read-write, etc.) is enforced by types:
+
+```rust
+use memsafe::type_state::MemSafe;
+// initialize a 32-bytes buffer in no access state
+let secret = MemSafe::new([0_u8; 32]).unwrap();
+
+// make the buffer read-write and write into it
+let info = "my-scret-info";
+let mut secret = secret.read_write().unwrap();
+secret[..info.len()].copy_from_slice(info.as_bytes());
+
+// make array read only read from it
+let secret = secret.read_only().unwrap();
+println!("Secure data: {:02X?}", *secret);
+```
+
 ## Features
 - **Memory Locking**: Prevents swapping to disk using `mlock` (Unix) or `VirtualLock` (Windows).
 - **Access Restriction**: Defaults to no-access mode, with temporary read/write windows.
@@ -39,6 +64,10 @@ let mut secret = MemSafe::new([0_u8; 32]).unwrap();
 Run the following in the root of your project:
 ```shell
 cargo add memsafe
+```
+For type_state feature to be enabled add it like below:
+```bash
+cargo add memsafe --features type-state
 ```
 
 ## Security Mechanisms: A Deep Dive for Technical Enthusiasts
@@ -53,7 +82,7 @@ The following milestones highlight the technical implementation and security mec
     - **Technical Details**: Conditional compilation via `#[cfg(unix)]` and `#[cfg(windows)]` directives isolates platform-specific code. The `unix` feature activates `libc` for POSIX calls, while the `windows` feature leverages `winapi` for Windows API functions, with `default = ["unix"]` in `Cargo.toml` enabling Unix support out of the box. CI testing uses a matrix strategy (`ubuntu-latest`, `macos-latest` with `unix`; `windows-latest` with `windows`) to build and test with `--no-default-features --features ${{ matrix.features }}`.
     - **Security Handling**: This guarantees uniform security behavior across platforms, preventing gaps from missing platform-specific protections (e.g., no `mlock` fallback on Windows) and ensuring dependency minimization.
 
-- **Secure Memory Cleanup on Drop**
+- **Secure Memory Cleanup on Drop (Zeroization)**
     - **Technical Details**: The `Drop` implementation zeroes the memory region using `ptr::write_bytes(ptr, 0, len)` before deallocation. On Unix, `munlock` releases the memory lock, followed by `munmap` to free the region. On Windows, `VirtualUnlock` unlocks the memory, and `VirtualFree` with `MEM_RELEASE` deallocates it. This process is executed within an `unsafe` block to handle raw pointer operations.
     - **Security Handling**: By overwriting memory with zeros prior to release, this prevents residual data from being accessed post-deallocation, mitigating risks of memory scraping or reuse attacks.
 

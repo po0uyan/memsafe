@@ -21,7 +21,6 @@ jobs:
         os: [ ubuntu-latest, macos-latest, windows-latest ]
         arch: [ x86_64, aarch64, i686, armv7, ppc64le, riscv64 ]
         exclude:
-          # Exclude Windows on non-x86 architectures
           - os: windows-latest
             arch: aarch64
           - os: windows-latest
@@ -30,7 +29,6 @@ jobs:
             arch: ppc64le
           - os: windows-latest
             arch: riscv64
-          # Exclude macOS on 32-bit and non-Apple architectures
           - os: macos-latest
             arch: i686
           - os: macos-latest
@@ -41,7 +39,6 @@ jobs:
             arch: riscv64
 
         include:
-          # x86_64 targets (64-bit)
           - os: ubuntu-latest
             arch: x86_64
             target: x86_64-unknown-linux-gnu
@@ -52,7 +49,6 @@ jobs:
             arch: x86_64
             target: x86_64-pc-windows-msvc
 
-          # ARM64/AArch64 targets (64-bit)
           - os: ubuntu-latest
             arch: aarch64
             target: aarch64-unknown-linux-gnu
@@ -60,7 +56,6 @@ jobs:
             arch: aarch64
             target: aarch64-apple-darwin
 
-          # i686 targets (32-bit x86)
           - os: ubuntu-latest
             arch: i686
             target: i686-unknown-linux-gnu
@@ -68,22 +63,20 @@ jobs:
             arch: i686
             target: i686-pc-windows-msvc
 
-          # ARM32/ARMv7 targets (32-bit)
           - os: ubuntu-latest
             arch: armv7
             target: armv7-unknown-linux-gnueabihf
 
-          # PowerPC 64-bit Little Endian
           - os: ubuntu-latest
             arch: ppc64le
             target: powerpc64le-unknown-linux-gnu
 
-          # RISC-V 64-bit
           - os: ubuntu-latest
             arch: riscv64
             target: riscv64gc-unknown-linux-gnu
 
-      fail-fast: false
+      fail-fast: true
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -95,7 +88,6 @@ jobs:
           targets: ${{ matrix.target }}
           components: clippy
 
-      # Cache dependencies to speed up builds
       - name: Cache cargo registry
         uses: actions/cache@v3
         with:
@@ -107,53 +99,59 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-${{ matrix.target }}-cargo-
 
-      # Install cross for more efficient cross-compilation
       - name: Install cross
         if: matrix.os == 'ubuntu-latest' && matrix.arch != 'x86_64'
-        run: |
-          cargo install cross --git https://github.com/cross-rs/cross
+        run: cargo install cross --git https://github.com/cross-rs/cross
 
-      # Run Clippy for the native architectures
       - name: Run Clippy (native)
-        if: (matrix.os == 'ubuntu-latest' && matrix.arch == 'x86_64') || (matrix.os == 'macos-latest' && matrix.arch == 'x86_64') || (matrix.os == 'windows-latest' && matrix.arch == 'x86_64')
+        if: matrix.os == 'ubuntu-latest' && matrix.arch == 'x86_64' || matrix.os == 'macos-latest' || matrix.os == 'windows-latest'
         run: cargo clippy --target ${{ matrix.target }}
 
-      # Run Clippy for Linux cross-compilation
       - name: Run Clippy (Linux cross-compilation)
         if: matrix.os == 'ubuntu-latest' && matrix.arch != 'x86_64'
         run: cross clippy --target ${{ matrix.target }}
 
-      # Native builds and tests
-      - name: Build (native)
-        if: (matrix.os == 'ubuntu-latest' && matrix.arch == 'x86_64') || (matrix.os == 'macos-latest') || (matrix.os == 'windows-latest')
-        run: cargo build --verbose --target ${{ matrix.target }}
+      - name: Build and Test (native - default)
+        if: matrix.os == 'ubuntu-latest' && matrix.arch == 'x86_64' || matrix.os == 'macos-latest' || matrix.os == 'windows-latest'
+        run: |
+          cargo build --verbose --target ${{ matrix.target }}
+          cargo test --verbose --target ${{ matrix.target }}
 
-      - name: Test (native)
-        if: (matrix.os == 'ubuntu-latest' && matrix.arch == 'x86_64') || (matrix.os == 'macos-latest' && matrix.arch == 'x86_64') || (matrix.os == 'windows-latest' && matrix.arch == 'x86_64')
-        run: cargo test --verbose --target ${{ matrix.target }}
+      - name: Build and Test (native - type-state)
+        if: matrix.os == 'ubuntu-latest' && matrix.arch == 'x86_64' || matrix.os == 'macos-latest' || matrix.os == 'windows-latest'
+        run: |
+          cargo build --verbose --no-default-features --features type-state --target ${{ matrix.target }}
+          cargo test --verbose --no-default-features --features type-state --target ${{ matrix.target }}
 
-      # Cross-compilation for Linux targets using cross
-      - name: Build (Linux cross-compilation)
+      - name: Build and Test (Linux cross-compilation - default)
         if: matrix.os == 'ubuntu-latest' && matrix.arch != 'x86_64'
-        run: cross build --verbose --target ${{ matrix.target }}
+        run: |
+          cross build --verbose --target ${{ matrix.target }}
+          cross test --verbose --target ${{ matrix.target }}
 
-      - name: Test (Linux cross-compilation)
+      - name: Build and Test (Linux cross-compilation - type-state)
         if: matrix.os == 'ubuntu-latest' && matrix.arch != 'x86_64'
-        run: cross test --verbose --target ${{ matrix.target }}
+        run: |
+          cross build --verbose --no-default-features --features type-state --target ${{ matrix.target }}
+          cross test --verbose --no-default-features --features type-state --target ${{ matrix.target }}
 
-      # Windows i686 cross-compilation
       - name: Build and Test (Windows i686)
         if: matrix.os == 'windows-latest' && matrix.arch == 'i686'
         run: |
           cargo build --verbose --target ${{ matrix.target }}
           cargo test --verbose --target ${{ matrix.target }}
+          cargo build --verbose --no-default-features --features type-state --target ${{ matrix.target }}
+          cargo test --verbose --no-default-features --features type-state --target ${{ matrix.target }}
 
-      # macOS aarch64 cross-compilation
       - name: Build and Test (macOS aarch64)
         if: matrix.os == 'macos-latest' && matrix.arch == 'aarch64'
         run: |
           cargo build --verbose --target ${{ matrix.target }}
           cargo test --verbose --target ${{ matrix.target }}
+          cargo build --verbose --no-default-features --features type-state --target ${{ matrix.target }}
+          cargo test --verbose --no-default-features --features type-state --target ${{ matrix.target }}
+
+
   release:
     name: Release on successful tests and merge
     needs: test
