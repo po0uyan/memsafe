@@ -1,19 +1,18 @@
-use memsafe::MemSafe;
-
 /// Test suite for MemSafe functionality
 /// These tests verify the core functionality of the MemSafe wrapper
+/// type-state an optional functionality to gain more control on memory states if needed
+#[cfg(feature = "type-state")]
 #[cfg(test)]
 mod memory_safety_tests {
+    use memsafe::type_state::MemSafe;
     use std::{
         io::{Cursor, Read, Write},
         sync::Arc,
     };
 
-    use super::*;
-
     #[test]
-    fn test_readme_example() {
-        use memsafe::MemSafe;
+    fn test_type_state_usage() {
+        use memsafe::type_state::MemSafe;
         // initialize in an buffer in no access state
         let secret = MemSafe::new([0_u8; 32]).unwrap();
 

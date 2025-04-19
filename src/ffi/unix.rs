@@ -1,4 +1,4 @@
-use crate::MemoryError;
+use crate::error::MemoryError;
 
 /// Wrapper over `mmap`. Full documentation with `man mmap`.
 pub fn mmap<T>(
@@ -11,11 +11,11 @@ pub fn mmap<T>(
     let mmap_offset = if cfg!(target_pointer_width = "32") {
         offset as i32 as libc::off_t
     } else {
-        offset as libc::off_t  // Default to i64 for other architectures
+        offset as libc::off_t // Default to i64 for other architectures
     };
     let ptr = unsafe { libc::mmap(std::ptr::null_mut(), len, prot, flags, fd, mmap_offset) };
     if ptr == libc::MAP_FAILED {
-        Err(MemoryError(std::io::Error::last_os_error()))
+        Err(std::io::Error::last_os_error().into())
     } else {
         Ok(ptr as *mut T)
     }
@@ -24,7 +24,7 @@ pub fn mmap<T>(
 /// Wrapper over `mprotect`. Full documentation with `man mprotect`.
 pub fn mprotect<T>(ptr: *mut T, len: usize, prot: i32) -> Result<(), MemoryError> {
     if unsafe { libc::mprotect(ptr as *mut libc::c_void, len, prot) } != 0 {
-        Err(MemoryError(std::io::Error::last_os_error()))
+        Err(std::io::Error::last_os_error().into())
     } else {
         Ok(())
     }
@@ -33,7 +33,7 @@ pub fn mprotect<T>(ptr: *mut T, len: usize, prot: i32) -> Result<(), MemoryError
 /// Wrapper over `mlock`. Full documentation with `man mlock`.
 pub fn mlock<T>(ptr: *mut T, len: usize) -> Result<(), MemoryError> {
     if unsafe { libc::mlock(ptr as *const libc::c_void, len) } != 0 {
-        Err(MemoryError(std::io::Error::last_os_error()))
+        Err(std::io::Error::last_os_error().into())
     } else {
         Ok(())
     }
@@ -44,7 +44,7 @@ pub fn mlock<T>(ptr: *mut T, len: usize) -> Result<(), MemoryError> {
 #[cfg(target_os = "linux")]
 pub fn madvice<T>(ptr: *mut T, len: usize, advice: i32) -> Result<(), MemoryError> {
     if unsafe { libc::madvise(ptr as *mut libc::c_void, len, advice) } != 0 {
-        Err(MemoryError(std::io::Error::last_os_error()))
+        Err(std::io::Error::last_os_error().into())
     } else {
         Ok(())
     }
@@ -53,7 +53,7 @@ pub fn madvice<T>(ptr: *mut T, len: usize, advice: i32) -> Result<(), MemoryErro
 /// Wrapper over `munlock`. Full documentation with `man munlock`.
 pub fn munlock<T>(ptr: *mut T, len: usize) -> Result<(), MemoryError> {
     if unsafe { libc::munlock(ptr as *mut libc::c_void, len) } != 0 {
-        Err(MemoryError(std::io::Error::last_os_error()))
+        Err(std::io::Error::last_os_error().into())
     } else {
         Ok(())
     }
@@ -63,7 +63,7 @@ pub fn munlock<T>(ptr: *mut T, len: usize) -> Result<(), MemoryError> {
 pub fn munmap<T>(ptr: *mut T, len: usize) -> Result<(), MemoryError> {
     //
     if unsafe { libc::munmap(ptr as *mut libc::c_void, len) } != 0 {
-        Err(MemoryError(std::io::Error::last_os_error()))
+        Err(std::io::Error::last_os_error().into())
     } else {
         Ok(())
     }

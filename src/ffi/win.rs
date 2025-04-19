@@ -3,7 +3,7 @@ use winapi::{
     um::memoryapi::{VirtualAlloc, VirtualFree, VirtualLock, VirtualProtect, VirtualUnlock},
 };
 
-use crate::MemoryError;
+use crate::error::MemoryError;
 
 /// Wrapper over `VirtualAlloc`. Full documentation here:
 /// https://learn.microsoft.com/en-us/windows/win32/api/memoryapi/nf-memoryapi-virtualalloc
@@ -15,7 +15,7 @@ pub fn virtual_alloc<T>(
 ) -> Result<*mut T, MemoryError> {
     let ptr = unsafe { VirtualAlloc(ptr, len, allocation_type, protect) };
     if ptr.is_null() {
-        Err(MemoryError(std::io::Error::last_os_error()))
+        Err(std::io::Error::last_os_error().into())
     } else {
         Ok(ptr as *mut T)
     }
@@ -25,7 +25,7 @@ pub fn virtual_alloc<T>(
 /// https://learn.microsoft.com/en-us/windows/win32/api/memoryapi/nf-memoryapi-virtualfree
 pub fn virtual_free<T>(ptr: *mut T, len: usize, free_type: u32) -> Result<(), MemoryError> {
     if unsafe { VirtualFree(ptr as *mut _, len, free_type) } == 0 {
-        Err(MemoryError(std::io::Error::last_os_error()))
+        Err(std::io::Error::last_os_error().into())
     } else {
         Ok(())
     }
@@ -40,7 +40,7 @@ pub fn virtual_protect<T>(
     old_protect: &mut u32,
 ) -> Result<(), MemoryError> {
     if unsafe { VirtualProtect(ptr as *mut c_void, len, new_protect, old_protect) } == 0 {
-        Err(MemoryError(std::io::Error::last_os_error()))
+        Err(std::io::Error::last_os_error().into())
     } else {
         Ok(())
     }
@@ -50,7 +50,7 @@ pub fn virtual_protect<T>(
 /// https://learn.microsoft.com/en-us/windows/win32/api/memoryapi/nf-memoryapi-virtuallock
 pub fn virtual_lock<T>(ptr: *mut T, len: usize) -> Result<(), MemoryError> {
     if unsafe { VirtualLock(ptr as *mut _, len) } == 0 {
-        Err(MemoryError(std::io::Error::last_os_error()))
+        Err(std::io::Error::last_os_error().into())
     } else {
         Ok(())
     }
@@ -60,7 +60,7 @@ pub fn virtual_lock<T>(ptr: *mut T, len: usize) -> Result<(), MemoryError> {
 /// https://learn.microsoft.com/en-us/windows/win32/api/memoryapi/nf-memoryapi-virtualunlock
 pub fn virtual_unlock<T>(ptr: *mut T, len: usize) -> Result<(), MemoryError> {
     if unsafe { VirtualUnlock(ptr as *mut _, len) } == 0 {
-        Err(MemoryError(std::io::Error::last_os_error()))
+        Err(std::io::Error::last_os_error().into())
     } else {
         Ok(())
     }
