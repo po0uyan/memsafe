@@ -110,7 +110,9 @@ impl<T> Deref for MemSafeRead<'_, T> {
 
 impl<T> Drop for MemSafeRead<'_, T> {
     fn drop(&mut self) {
-        self.mem_safe.cell.low_priv().unwrap();
+        if let Err(e) = self.mem_safe.cell.low_priv() {
+            eprintln!("memsafe: drop: failed to restore low privileges after read: {}", e);
+        }
     }
 }
 
@@ -134,6 +136,8 @@ impl<T> DerefMut for MemSafeWrite<'_, T> {
 
 impl<T> Drop for MemSafeWrite<'_, T> {
     fn drop(&mut self) {
-        self.mem_safe.cell.low_priv().unwrap();
+        if let Err(e) = self.mem_safe.cell.low_priv() {
+            eprintln!("memsafe: drop: failed to restore low privileges after write: {}", e);
+        }
     }
 }

@@ -57,7 +57,7 @@ println!("Secure data: {:02X?}", *secret);
 ## Features
 - **Memory Locking**: Prevents swapping to disk using `mlock` (Unix) or `VirtualLock` (Windows).
 - **Access Restriction**: Defaults to no-access mode, with temporary read/write windows.
-- **Secure Cleanup**: Zeroes memory on drop.
+- **Secure Cleanup**: Zeroes memory on drop. Cleanup is best-effort: if restoring privileges, unlocking, or deallocating the protected region fails, `memsafe` logs an error to stderr instead of panicking.
 - **Cross-Platform**: Supports Unix (via `libc`) and Windows (via `winapi`) with optional dependencies.
 
 ## Installation

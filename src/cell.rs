@@ -86,10 +86,21 @@ impl<T> DerefMut for Cell<T> {
 
 impl<T> Drop for Cell<T> {
     fn drop(&mut self) {
-        mem_readwrite(self.ptr, std::mem::size_of::<T>()).unwrap();
-        ptr_drop_in_place(self.ptr);
-        ptr_fill_zero(self.ptr);
-        mem_unlock(self.ptr, std::mem::size_of::<T>()).unwrap();
-        mem_dealloc(self.ptr, std::mem::size_of::<T>()).unwrap();
+        let len = std::mem::size_of::<T>();
+        // if we cannot safely obtain read-write access, avoid touching the contents
+        // but still attempt to unlock and deallocate the underlying memory region
+        match mem_readwrite(self.ptr, len) {
+            Ok(()) => {
+                ptr_drop_in_place(self.ptr);
+                ptr_fill_zero(self.ptr);
+            }
+            Err(e) => eprintln!("memsafe: drop: failed to set read-write before cleanup: {}", e),
+        }
+        if let Err(e) = mem_unlock(self.ptr, len) {
+            eprintln!("memsafe: drop: failed to unlock memory: {}", e);
+        }
+        if let Err(e) = mem_dealloc(self.ptr, len) {
+            eprintln!("memsafe: drop: failed to deallocate memory: {}", e);
+        }
     }
 }
