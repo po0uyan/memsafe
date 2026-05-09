@@ -5,8 +5,9 @@ pub mod error;
 mod ffi;
 mod mem_safe;
 mod ptr_ops;
+mod secret;
 #[cfg(feature = "type-state")]
 pub mod type_state;
 
-
 pub use mem_safe::{MemSafe, MemSafeRead, MemSafeWrite};
+pub use secret::Secret;

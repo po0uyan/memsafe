@@ -2,10 +2,9 @@ use std::{
     convert::Infallible,
     marker::PhantomData,
     ops::{Deref, DerefMut},
-    str::FromStr,
 };
 
-use crate::{cell::Cell, ptr_ops::zeroize_string_heap, MemoryError};
+use crate::{cell::Cell, MemoryError};
 
 /// Represents a memory state with no access permissions.
 #[cfg(unix)]
@@ -150,130 +149,6 @@ impl<T> MemSafe<T, ReadWrite> {
     /// Does nothing and return the object itself.
     pub fn read_write(self) -> Result<Self, Infallible> {
         Ok(self)
-    }
-}
-
-#[cfg(unix)]
-impl<const N: usize> MemSafe<[u8; N], NoAccess> {
-    /// Creates a `MemSafe` protected byte buffer from an owned `String`,
-    /// securely zeroizing the source string's heap memory.
-    ///
-    /// The string's bytes are copied into a fixed-size buffer stored entirely
-    /// within protected memory. The original `String`'s heap allocation is
-    /// overwritten with zeros before being deallocated.
-    ///
-    /// # Errors
-    ///
-    /// Returns `MemoryError` if the string length exceeds the buffer size `N`.
-    /// The source string's heap data is zeroized even on error.
-    pub fn from_string(mut s: String) -> Result<Self, MemoryError> {
-        let len = s.len();
-        if len > N {
-            zeroize_string_heap(&mut s);
-            return Err(MemoryError::from(std::io::Error::new(
-                std::io::ErrorKind::InvalidInput,
-                "string length exceeds buffer size",
-            )));
-        }
-        let mut buf = [0u8; N];
-        buf[..len].copy_from_slice(s.as_bytes());
-        zeroize_string_heap(&mut s);
-        Self::new(buf)
-    }
-}
-
-#[cfg(windows)]
-impl<const N: usize> MemSafe<[u8; N], ReadOnly> {
-    /// Creates a `MemSafe` protected byte buffer from an owned `String`,
-    /// securely zeroizing the source string's heap memory.
-    ///
-    /// # Errors
-    ///
-    /// Returns `MemoryError` if the string length exceeds the buffer size `N`.
-    /// The source string's heap data is zeroized even on error.
-    pub fn from_string(mut s: String) -> Result<Self, MemoryError> {
-        let len = s.len();
-        if len > N {
-            zeroize_string_heap(&mut s);
-            return Err(MemoryError::from(std::io::Error::new(
-                std::io::ErrorKind::InvalidInput,
-                "string length exceeds buffer size",
-            )));
-        }
-        let mut buf = [0u8; N];
-        buf[..len].copy_from_slice(s.as_bytes());
-        zeroize_string_heap(&mut s);
-        Self::new(buf)
-    }
-}
-
-#[cfg(unix)]
-impl<const N: usize> FromStr for MemSafe<[u8; N], NoAccess> {
-    type Err = MemoryError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        if s.len() > N {
-            return Err(MemoryError::from(std::io::Error::new(
-                std::io::ErrorKind::InvalidInput,
-                "string length exceeds buffer size",
-            )));
-        }
-        let mut buf = [0u8; N];
-        buf[..s.len()].copy_from_slice(s.as_bytes());
-        Self::new(buf)
-    }
-}
-
-#[cfg(windows)]
-impl<const N: usize> FromStr for MemSafe<[u8; N], ReadOnly> {
-    type Err = MemoryError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        if s.len() > N {
-            return Err(MemoryError::from(std::io::Error::new(
-                std::io::ErrorKind::InvalidInput,
-                "string length exceeds buffer size",
-            )));
-        }
-        let mut buf = [0u8; N];
-        buf[..s.len()].copy_from_slice(s.as_bytes());
-        Self::new(buf)
-    }
-}
-
-#[cfg(unix)]
-impl<const N: usize> TryFrom<&str> for MemSafe<[u8; N], NoAccess> {
-    type Error = MemoryError;
-
-    fn try_from(s: &str) -> Result<Self, Self::Error> {
-        <Self as FromStr>::from_str(s)
-    }
-}
-
-#[cfg(unix)]
-impl<const N: usize> TryFrom<String> for MemSafe<[u8; N], NoAccess> {
-    type Error = MemoryError;
-
-    fn try_from(s: String) -> Result<Self, Self::Error> {
-        Self::from_string(s)
-    }
-}
-
-#[cfg(windows)]
-impl<const N: usize> TryFrom<&str> for MemSafe<[u8; N], ReadOnly> {
-    type Error = MemoryError;
-
-    fn try_from(s: &str) -> Result<Self, Self::Error> {
-        <Self as FromStr>::from_str(s)
-    }
-}
-
-#[cfg(windows)]
-impl<const N: usize> TryFrom<String> for MemSafe<[u8; N], ReadOnly> {
-    type Error = MemoryError;
-
-    fn try_from(s: String) -> Result<Self, Self::Error> {
-        Self::from_string(s)
     }
 }
 

@@ -8,7 +8,7 @@ use crate::ffi::mem_no_dump;
 
 use crate::{
     ffi::{mem_alloc, mem_dealloc, mem_lock, mem_readonly, mem_readwrite, mem_unlock},
-    ptr_ops::{ptr_deref, ptr_deref_mut, ptr_drop_in_place, ptr_fill_zero, ptr_write},
+    ptr_ops::{ptr_deref, ptr_deref_mut, ptr_drop_in_place, ptr_fill_zero, ptr_write, secure_zero},
     MemoryError,
 };
 
@@ -67,6 +67,69 @@ impl<T> Cell<T> {
 
     pub fn read_write(&mut self) -> Result<(), MemoryError> {
         mem_readwrite(self.ptr, std::mem::size_of::<T>())
+    }
+}
+
+impl<const N: usize> Cell<[u8; N]> {
+    /// Allocate a protected `N`-byte page and let `init` fill it in place.
+    ///
+    /// The page is allocated, `mlock`'d, marked `MADV_DONTDUMP` (Linux), and
+    /// OS-zeroed (`mmap MAP_ANONYMOUS` / `VirtualAlloc MEM_COMMIT`) **before**
+    /// `init` runs. `init` writes the secret through `&mut [u8; N]` directly
+    /// into the protected region — no stack temporary, no allocator detour.
+    /// After `init` returns, the page is transitioned to its lowest-privilege
+    /// state (`PROT_NONE` on Unix, `PAGE_READONLY` on Windows).
+    ///
+    /// If `init` panics the protected page leaks (`Cell` is never constructed
+    /// so its `Drop` does not run). Treat `init` as panic-free.
+    pub fn new_with<F>(init: F) -> Result<Self, MemoryError>
+    where
+        F: FnOnce(&mut [u8; N]),
+    {
+        let len = std::mem::size_of::<[u8; N]>();
+        let ptr: *mut [u8; N] = mem_alloc(len)?;
+        mem_lock(ptr, len)?;
+
+        #[cfg(target_os = "linux")]
+        crate::ffi::mem_no_dump(ptr, len)?;
+
+        // Page is currently RW + zero-filled. Caller writes the secret
+        // straight into protected memory.
+        init(unsafe { &mut *ptr });
+
+        #[cfg(windows)]
+        mem_readonly(ptr, len)?;
+        #[cfg(unix)]
+        mem_noaccess(ptr, len)?;
+
+        Ok(Cell { ptr })
+    }
+
+    /// Encapsulate an owned byte source into a fresh protected page,
+    /// volatile-zeroing the source after the copy.
+    ///
+    /// On error the source is returned alongside the failure reason:
+    /// - On length mismatch (`source.len() > N`): source is returned untouched.
+    /// - On memory-protection failure: source has already been zeroed.
+    pub fn from_bytes<T: AsMut<[u8]>>(mut bytes: T) -> Result<Self, (T, MemoryError)> {
+        let len = bytes.as_mut().len();
+        if len > N {
+            return Err((
+                bytes,
+                MemoryError::from(std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    "byte slice exceeds buffer size",
+                )),
+            ));
+        }
+        Self::new_with(|page| {
+            let slice = bytes.as_mut();
+            unsafe {
+                std::ptr::copy_nonoverlapping(slice.as_ptr(), page.as_mut_ptr(), len);
+            }
+            secure_zero(slice);
+        })
+        .map_err(|e| (bytes, e))
     }
 }
 

@@ -1,7 +1,5 @@
 use crate::cell::Cell;
-use crate::ptr_ops::zeroize_string_heap;
 use std::ops::{Deref, DerefMut};
-use std::str::FromStr;
 
 use crate::MemoryError;
 
@@ -38,7 +36,7 @@ use crate::MemoryError;
 /// ```
 #[derive(Debug)]
 pub struct MemSafe<T> {
-    cell: Cell<T>,
+    pub(crate) cell: Cell<T>,
 }
 
 unsafe impl<T> Send for MemSafe<T> where T: Send {}
@@ -95,96 +93,6 @@ impl<T> MemSafe<T> {
     pub fn write(&mut self) -> Result<MemSafeWrite<'_, T>, MemoryError> {
         self.cell.read_write()?;
         Ok(MemSafeWrite { mem_safe: self })
-    }
-}
-
-impl<const N: usize> MemSafe<[u8; N]> {
-    /// Creates a `MemSafe` protected byte buffer from an owned `String`,
-    /// securely zeroizing the source string's heap memory.
-    ///
-    /// The string's bytes are copied into a fixed-size buffer stored entirely
-    /// within protected memory. The original `String`'s heap allocation is
-    /// overwritten with zeros before being deallocated, so no trace of the
-    /// secret remains in unprotected memory.
-    ///
-    /// For borrowed input, see [`FromStr`] / [`TryFrom<&str>`]. Note that
-    /// borrowed sources cannot be zeroized by this crate; the caller is
-    /// responsible for the lifecycle of the source.
-    ///
-    /// # Errors
-    ///
-    /// Returns `MemoryError` if the string length exceeds the buffer size `N`,
-    /// or if memory protection could not be initialized. The source string's
-    /// heap data is zeroized even on error.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use memsafe::MemSafe;
-    ///
-    /// let api_key = String::from("my-api-key");
-    /// let secret = MemSafe::<[u8; 64]>::from_string(api_key).unwrap();
-    /// ```
-    pub fn from_string(mut s: String) -> Result<Self, MemoryError> {
-        let len = s.len();
-        if len > N {
-            zeroize_string_heap(&mut s);
-            return Err(MemoryError::from(std::io::Error::new(
-                std::io::ErrorKind::InvalidInput,
-                "string length exceeds buffer size",
-            )));
-        }
-        let mut buf = [0u8; N];
-        buf[..len].copy_from_slice(s.as_bytes());
-        zeroize_string_heap(&mut s);
-        Self::new(buf)
-    }
-}
-
-/// Parse a string slice into a `MemSafe` protected byte buffer.
-///
-/// The string's bytes are copied into a fixed-size buffer stored entirely
-/// within protected memory. Remaining buffer bytes are zero-filled.
-///
-/// The source `&str` is borrowed and cannot be zeroized; use
-/// [`MemSafe::from_string`] for owned input that should be zeroized.
-///
-/// # Examples
-///
-/// ```
-/// use memsafe::MemSafe;
-///
-/// let secret: MemSafe<[u8; 64]> = "my-api-key".parse().unwrap();
-/// ```
-impl<const N: usize> FromStr for MemSafe<[u8; N]> {
-    type Err = MemoryError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        if s.len() > N {
-            return Err(MemoryError::from(std::io::Error::new(
-                std::io::ErrorKind::InvalidInput,
-                "string length exceeds buffer size",
-            )));
-        }
-        let mut buf = [0u8; N];
-        buf[..s.len()].copy_from_slice(s.as_bytes());
-        Self::new(buf)
-    }
-}
-
-impl<const N: usize> TryFrom<&str> for MemSafe<[u8; N]> {
-    type Error = MemoryError;
-
-    fn try_from(s: &str) -> Result<Self, Self::Error> {
-        <Self as FromStr>::from_str(s)
-    }
-}
-
-impl<const N: usize> TryFrom<String> for MemSafe<[u8; N]> {
-    type Error = MemoryError;
-
-    fn try_from(s: String) -> Result<Self, Self::Error> {
-        Self::from_string(s)
     }
 }
 
