@@ -128,6 +128,14 @@ fn sealed_page_read_is_fatal() {
         .status()
         .unwrap();
 
+    // Under emulated CI (cross + qemu), the test binary cannot re-exec
+    // itself; the spawn fails with shell exit code 127. Skip the enforcement
+    // assertion there — every native target in the CI matrix still runs it.
+    if status.code() == Some(127) {
+        eprintln!("skipping: this environment cannot respawn the test binary");
+        return;
+    }
+
     use std::os::unix::process::ExitStatusExt;
     assert!(
         status.signal().is_some(),
@@ -165,6 +173,14 @@ fn sealed_page_write_is_fatal() {
         .env("MEMSAFE_SEALED_WRITE_CHILD", "1")
         .status()
         .unwrap();
+
+    // Under emulated CI (cross + qemu), the test binary cannot re-exec
+    // itself; the spawn fails with shell exit code 127. Skip the enforcement
+    // assertion there — every native target in the CI matrix still runs it.
+    if status.code() == Some(127) {
+        eprintln!("skipping: this environment cannot respawn the test binary");
+        return;
+    }
 
     use std::os::unix::process::ExitStatusExt;
     assert!(
