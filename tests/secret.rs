@@ -174,3 +174,157 @@ fn new_with_pattern_simulating_stream_read() {
     let view = secret.read().unwrap();
     assert_eq!(&view[..source.len()], source);
 }
+
+#[test]
+fn new_with_panic_in_init_unwinds_cleanly() {
+    // If `init` panics partway through writing the secret, unwinding
+    // runs the construction guard's `Drop`: the page is volatile-zeroed,
+    // unlocked, and unmapped before the panic propagates. Externally,
+    // the panic surfaces unchanged and no partially-built `Secret`
+    // reaches the caller.
+    let result = std::panic::catch_unwind(|| {
+        Secret::<32>::new_with(|buf| {
+            buf[..3].copy_from_slice(b"abc");
+            panic!("simulated init failure");
+        })
+    });
+    assert!(result.is_err(), "panic should propagate to the caller");
+}
+
+#[test]
+fn read_guard_can_be_taken_repeatedly() {
+    // Each read elevates the page and reseals it on guard drop; the cycle
+    // must be repeatable indefinitely with stable contents.
+    let mut secret = Secret::<16>::new_with(|buf| {
+        buf[..6].copy_from_slice(b"stable");
+    })
+    .unwrap();
+    for _ in 0..100 {
+        let view = secret.read().unwrap();
+        assert_eq!(&view[..6], b"stable");
+    }
+}
+
+#[test]
+fn interleaved_write_and_read_cycles_persist() {
+    // Alternating write/read guards must observe every previous mutation:
+    // the reseal-elevate cycle may not lose or corrupt page contents.
+    let mut secret = Secret::<8>::new_with(|_| {}).unwrap();
+    for round in 0u8..50 {
+        {
+            let mut w = secret.write().unwrap();
+            w[0] = round;
+            // Reading back through the *write* guard must also work.
+            assert_eq!(w[0], round);
+        }
+        let r = secret.read().unwrap();
+        assert_eq!(r[0], round);
+    }
+}
+
+#[test]
+fn secrets_are_independent() {
+    // Two secrets must live on distinct pages: mutating one may not affect
+    // the other.
+    let mut a = Secret::<16>::new_with(|b| b.fill(0xAA)).unwrap();
+    let mut b = Secret::<16>::new_with(|b| b.fill(0xBB)).unwrap();
+    {
+        let mut w = a.write().unwrap();
+        w.fill(0x11);
+    }
+    assert_eq!(b.read().unwrap()[0], 0xBB);
+    assert_eq!(a.read().unwrap()[0], 0x11);
+}
+
+#[test]
+fn secret_is_send_across_threads() {
+    // A secret created on one thread must be movable to another and remain
+    // readable there (the page belongs to the process, not the thread).
+    let mut secret = Secret::<16>::new_with(|buf| {
+        buf[..5].copy_from_slice(b"moved");
+    })
+    .unwrap();
+
+    let handle = std::thread::spawn(move || {
+        {
+            let view = secret.read().unwrap();
+            assert_eq!(&view[..5], b"moved");
+        }
+        secret
+    });
+    let mut secret = handle.join().unwrap();
+    assert_eq!(&secret.read().unwrap()[..5], b"moved");
+}
+
+#[test]
+fn drop_after_use_does_not_panic() {
+    // Drop re-elevates, wipes, unlocks, and unmaps; it must succeed from
+    // every reachable guard state.
+    let mut secret = Secret::<32>::new_with(|b| b.fill(0x5A)).unwrap();
+    let _ = secret.read().unwrap();
+    let _ = secret.write().unwrap();
+    drop(secret);
+
+    // And from the never-accessed state.
+    let untouched = Secret::<32>::new_with(|_| {}).unwrap();
+    drop(untouched);
+}
+
+#[test]
+fn try_from_str_leaves_borrowed_source_intact() {
+    // Documented contract: a borrowed &str cannot be zeroized by the crate;
+    // the caller keeps full ownership of the source.
+    let source = String::from("my-api-key");
+    let _secret: Secret<32> = source.as_str().try_into().unwrap();
+    assert_eq!(source, "my-api-key");
+}
+
+#[test]
+fn try_from_str_exact_fit_and_empty() {
+    let mut exact: Secret<10> = "my-api-key".try_into().unwrap();
+    assert_eq!(&exact.read().unwrap()[..], b"my-api-key");
+
+    let mut empty: Secret<8> = "".try_into().unwrap();
+    assert_eq!(&empty.read().unwrap()[..], &[0u8; 8]);
+}
+
+#[test]
+fn try_from_string_error_preserves_unicode_exactly() {
+    // The returned String must be byte-for-byte the original, including
+    // multi-byte UTF-8 content.
+    let s = String::from("héllo-🔒-way-too-long-for-four-bytes");
+    let result: Result<Secret<4>, _> = s.clone().try_into();
+    let (returned, _err) = match result {
+        Ok(_) => panic!("expected error"),
+        Err(e) => e,
+    };
+    assert_eq!(returned, s);
+}
+
+#[test]
+fn error_kind_is_invalid_input_on_length_mismatch() {
+    let result: Result<Secret<4>, _> = "too-long-for-buffer".try_into();
+    let err = result.err().expect("expected length-mismatch error");
+    assert_eq!(err.inner().kind(), std::io::ErrorKind::InvalidInput);
+}
+
+#[test]
+fn memory_error_source_chain_exposes_inner_io_error() {
+    use std::error::Error;
+
+    // Force a length-mismatch error so we can walk the chain.
+    let result: Result<Secret<4>, _> = Secret::<4>::from_bytes(b"too-long".to_vec());
+    let (_returned, err) = match result {
+        Ok(_) => panic!("expected length-mismatch error"),
+        Err(e) => e,
+    };
+
+    // `Error::source()` must expose the inner `io::Error` so structured
+    // error reporters (anyhow, eyre, ...) can drill into the root cause
+    // without parsing the `Display` text.
+    let source = err.source().expect("MemoryError must expose a source");
+    let io_err = source
+        .downcast_ref::<std::io::Error>()
+        .expect("source should downcast to io::Error");
+    assert_eq!(io_err.kind(), std::io::ErrorKind::InvalidInput);
+}

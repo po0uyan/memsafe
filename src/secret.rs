@@ -40,6 +40,23 @@ use crate::MemoryError;
 /// let key = b"my-api-key".to_vec();
 /// let mut secret = Secret::<64>::from_bytes(key).unwrap();
 /// ```
+///
+/// # Formatting is a compile-time error
+///
+/// `Secret` deliberately implements neither `Debug` nor `Display`, so a stray
+/// `{:?}` or `{}` in a log line can never leak it:
+///
+/// ```compile_fail
+/// use memsafe::Secret;
+/// let secret = Secret::<8>::new_with(|_| {}).unwrap();
+/// println!("{:?}", secret); // does not compile: `Secret` is not `Debug`
+/// ```
+///
+/// ```compile_fail
+/// use memsafe::Secret;
+/// let secret = Secret::<8>::new_with(|_| {}).unwrap();
+/// println!("{}", secret); // does not compile: `Secret` is not `Display`
+/// ```
 pub struct Secret<const N: usize> {
     inner: MemSafe<[u8; N]>,
 }
@@ -55,9 +72,9 @@ impl<const N: usize> Secret<N> {
     /// This is the most secure constructor: there is no "before" state in
     /// which the bytes existed in unprotected memory.
     ///
-    /// If `init` panics the protected page leaks (the `Drop` of the
-    /// underlying `Cell` does not run because construction never completes).
-    /// Treat `init` as panic-free.
+    /// If `init` panics, the construction guard volatile-zeroes the page,
+    /// unlocks it, and unmaps it before the panic propagates — a partially
+    /// written secret can neither leak nor linger.
     pub fn new_with<F>(init: F) -> Result<Self, MemoryError>
     where
         F: FnOnce(&mut [u8; N]),

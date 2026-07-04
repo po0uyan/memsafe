@@ -240,3 +240,58 @@ mod memory_safety_tests {
     fn evalute_sync<T: Sync>(_: &T) {}
     fn evalute_send<T: Send>(_: &T) {}
 }
+
+/// State-machine completeness: every declared transition — including the
+/// identity ones and the transitions back down to `NoAccess` — must work and
+/// preserve contents.
+#[cfg(feature = "type-state")]
+#[cfg(test)]
+mod state_transition_tests {
+    use memsafe::type_state::MemSafe;
+
+    #[test]
+    fn identity_transitions_are_noops() {
+        let ms = MemSafe::new([7_u8; 4]).unwrap();
+        #[cfg(unix)]
+        let ms = ms.no_access().unwrap(); // NoAccess -> NoAccess
+        let ms = ms.read_only().unwrap();
+        let ms = ms.read_only().unwrap(); // ReadOnly -> ReadOnly
+        let ms = ms.read_write().unwrap();
+        let ms = ms.read_write().unwrap(); // ReadWrite -> ReadWrite
+        assert_eq!(ms[0], 7);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn read_only_transitions_back_to_no_access() {
+        let ms = MemSafe::new([1_u8; 4]).unwrap().read_only().unwrap();
+        let ms = ms.no_access().unwrap();
+        // Contents must survive the round trip.
+        let ms = ms.read_only().unwrap();
+        assert_eq!(ms[0], 1);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn read_write_transitions_back_to_no_access() {
+        let mut ms = MemSafe::new([0_u8; 4]).unwrap().read_write().unwrap();
+        ms[0] = 9;
+        let ms = ms.no_access().unwrap();
+        let ms = ms.read_only().unwrap();
+        assert_eq!(ms[0], 9);
+    }
+
+    #[test]
+    fn as_ref_on_read_only() {
+        let ms = MemSafe::new([3_u8; 4]).unwrap().read_only().unwrap();
+        let inner: &[u8; 4] = ms.as_ref();
+        assert_eq!(inner[0], 3);
+    }
+
+    #[test]
+    fn as_ref_and_as_mut_on_read_write() {
+        let mut ms = MemSafe::new([0_u8; 4]).unwrap().read_write().unwrap();
+        ms.as_mut()[2] = 5;
+        assert_eq!(ms.as_ref()[2], 5);
+    }
+}

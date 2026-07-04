@@ -34,7 +34,9 @@ use crate::MemoryError;
 ///     # Ok(())
 /// }
 /// ```
-#[derive(Debug)]
+// No `Debug`: this crate withholds `Debug` from every type that participates
+// in handling secret memory, so nothing about the protected region can leak
+// through a formatting macro.
 pub struct MemSafe<T> {
     pub(crate) cell: Cell<T>,
 }
