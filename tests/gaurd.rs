@@ -71,3 +71,16 @@ mod tests {
         let _ = handle.join().unwrap();
     }
 }
+
+#[cfg(test)]
+mod write_guard_tests {
+    #[test]
+    fn write_guard_supports_read_back_through_deref() {
+        // MemSafeWrite implements Deref as well as DerefMut: values written
+        // through the guard must be readable through the same guard.
+        let mut mem_safe = memsafe::MemSafe::new([0_u8; 16]).unwrap();
+        let mut writer = mem_safe.write().unwrap();
+        writer[3] = 42;
+        assert_eq!(writer[3], 42);
+    }
+}

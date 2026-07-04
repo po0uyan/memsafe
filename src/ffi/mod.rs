@@ -129,7 +129,6 @@ pub fn mem_dealloc<T>(ptr: *mut T, len: usize) -> Result<(), MemoryError> {
 ///   access violation (Windows).
 #[cfg(unix)]
 pub fn mem_noaccess<T>(ptr: *mut T, len: usize) -> Result<(), MemoryError> {
-
     unix::mprotect(ptr, len, PROT_NONE)
 }
 

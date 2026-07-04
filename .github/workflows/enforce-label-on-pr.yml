@@ -10,26 +10,27 @@ on:
       - labeled
       - unlabeled
 
+permissions:
+  issues: write
+  pull-requests: write
+
 jobs:
   check-labels:
     runs-on: ubuntu-latest
     steps:
       - name: Check PR Labels
         env:
-          GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+          # Labels come straight from the event payload — no API call, no
+          # secret required (the previous RELEASE_TOKEN-based curl broke
+          # whenever the token expired).
+          LABELS: ${{ join(github.event.pull_request.labels.*.name, ' ') }}
         run: |
-          PR_NUMBER="${{ github.event.pull_request.number }}"
-          REPO="${{ github.repository }}"
-
-          LABELS=$(curl -s -H "Authorization: token $GH_TOKEN" \
-            "https://api.github.com/repos/$REPO/issues/$PR_NUMBER/labels" | jq -r '.[].name')
-
           # Required labels
           REQUIRED_LABELS=("minor" "major" "patch")
 
           # Check if PR contains at least one required label
           for label in "${REQUIRED_LABELS[@]}"; do
-            if echo "$LABELS" | grep -q "$label"; then
+            if echo " $LABELS " | grep -q " $label "; then
               echo "✅ PR has a valid label ($label)."
               exit 0
             fi
@@ -41,7 +42,7 @@ jobs:
       - name: Auto-Comment on PR if Missing Labels
         if: failure()
         env:
-          GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           REPO="${{ github.repository }}"
           PR_NUMBER="${{ github.event.pull_request.number }}"

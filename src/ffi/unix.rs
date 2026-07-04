@@ -68,3 +68,81 @@ pub fn munmap<T>(ptr: *mut T, len: usize) -> Result<(), MemoryError> {
         Ok(())
     }
 }
+
+/// Error-branch tests: every wrapper must translate a failing syscall into
+/// `Err(MemoryError)` instead of silently returning `Ok`. Each test feeds the
+/// syscall an argument POSIX defines as invalid (unmapped address, overflowing
+/// range, unaligned pointer), so the failures are deterministic across the
+/// Unix platforms in CI.
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const PAGE: usize = 4096;
+
+    #[test]
+    fn mmap_error_on_absurd_length() {
+        // A mapping the size of the whole address space can never succeed.
+        let result = mmap::<u8>(
+            usize::MAX,
+            libc::PROT_READ | libc::PROT_WRITE,
+            libc::MAP_PRIVATE | libc::MAP_ANONYMOUS,
+            -1,
+            0,
+        );
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn mprotect_error_on_unmapped_address() {
+        // The zero page is never mapped in a hosted process.
+        let result = mprotect(std::ptr::null_mut::<u8>(), PAGE, libc::PROT_READ);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn mlock_error_on_out_of_range_address() {
+        // The top page of the address space is never mappable; locking it
+        // must fail. (NULL is not used here: on macOS the reserved
+        // __PAGEZERO region makes mlock(NULL) succeed.)
+        let ptr = (usize::MAX & !(PAGE - 1)) as *mut u8;
+        let result = mlock(ptr, PAGE);
+        assert!(result.is_err());
+    }
+
+    /// True when the tests run under a user-mode emulator (the cross/qemu CI
+    /// targets), where qemu translates guest addresses into its own host
+    /// address space and edge-case syscall semantics stop matching a real
+    /// kernel's. cross images export these variables into the test process.
+    fn emulated_kernel() -> bool {
+        std::env::vars().any(|(k, _)| {
+            k == "QEMU_LD_PREFIX"
+                || k == "CROSS_RUNNER"
+                || (k.starts_with("CARGO_TARGET_") && k.ends_with("_RUNNER"))
+        })
+    }
+
+    #[test]
+    fn munlock_error_on_unmapped_page() {
+        // Unlocking the top page of the address space fails with ENOMEM on
+        // both Linux and the BSDs/macOS: the range is never mapped. (A
+        // `usize::MAX` length is NOT used here: Linux page-aligns the length,
+        // which wraps it to zero, and a zero-length munlock succeeds.)
+        let ptr = (usize::MAX & !(PAGE - 1)) as *mut u8;
+        let result = munlock(ptr, PAGE);
+        // Under qemu the "unmapped" guest page maps to arbitrary host memory
+        // and munlock can succeed; only a real kernel gives the guarantee.
+        if emulated_kernel() && result.is_ok() {
+            eprintln!("skipping: qemu user-mode emulation does not reproduce munlock semantics");
+            return;
+        }
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn munmap_error_on_unaligned_pointer() {
+        // POSIX requires the munmap address to be page-aligned.
+        let result = munmap(std::ptr::dangling_mut::<u8>(), PAGE);
+        assert!(result.is_err());
+    }
+}
