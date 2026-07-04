@@ -277,3 +277,164 @@ fn zero_sized_secret_is_rejected() {
     let err = result.err().expect("Secret::<0> must be rejected");
     assert_eq!(err.inner().kind(), std::io::ErrorKind::InvalidInput);
 }
+
+/// Ask the kernel, not the crate: /proc/self/smaps reports per-mapping
+/// VmFlags, so we can verify the secret's page really carries the
+/// protections we claim to configure — `lo` (mlocked), `dd` (excluded from
+/// core dumps), `wf` (wiped on fork). If a refactor ever drops one of the
+/// madvise/mlock calls, this fails even though every functional test passes.
+#[cfg(target_os = "linux")]
+#[test]
+fn kernel_reports_locked_nodump_wipeonfork_flags() {
+    if emulated_kernel() {
+        eprintln!("skipping: /proc maps under qemu describe the emulator, not the guest");
+        return;
+    }
+
+    let mut secret = Secret::<32>::new_with(|b| b.fill(1)).unwrap();
+    let view = secret.read().unwrap();
+    let addr = view.as_ptr() as usize;
+
+    let smaps = std::fs::read_to_string("/proc/self/smaps").unwrap();
+    let flags = vm_flags_for(&smaps, addr).expect("secret page not found in smaps");
+
+    for (flag, meaning) in [
+        ("lo", "mlock (never swapped)"),
+        ("dd", "MADV_DONTDUMP (excluded from core dumps)"),
+        ("wf", "MADV_WIPEONFORK (zeroed in forked children)"),
+    ] {
+        assert!(
+            flags.contains(&flag.to_string()),
+            "kernel does not report `{flag}` ({meaning}) on the secret page; VmFlags = {flags:?}"
+        );
+    }
+}
+
+/// Watch the guard state machine through the kernel's eyes: the mapping's
+/// permission bits in /proc/self/maps must read `---p` while sealed, `r--p`
+/// under a read guard, `rw-p` under a write guard, and return to `---p`
+/// after every guard drops.
+#[cfg(target_os = "linux")]
+#[test]
+fn kernel_reports_permission_transitions() {
+    if emulated_kernel() {
+        eprintln!("skipping: /proc maps under qemu describe the emulator, not the guest");
+        return;
+    }
+
+    let mut secret = Secret::<32>::new_with(|b| b.fill(1)).unwrap();
+
+    let addr = {
+        let view = secret.read().unwrap();
+        let addr = view.as_ptr() as usize;
+        assert_eq!(perms_for(addr).as_deref(), Some("r--p"), "read guard open");
+        addr
+    };
+    assert_eq!(
+        perms_for(addr).as_deref(),
+        Some("---p"),
+        "after read guard drop"
+    );
+
+    {
+        let _w = secret.write().unwrap();
+        assert_eq!(perms_for(addr).as_deref(), Some("rw-p"), "write guard open");
+    }
+    assert_eq!(
+        perms_for(addr).as_deref(),
+        Some("---p"),
+        "after write guard drop"
+    );
+
+    // Opening a guard on one secret must not unseal another.
+    let mut other = Secret::<32>::new_with(|b| b.fill(2)).unwrap();
+    let other_addr = {
+        let v = other.read().unwrap();
+        v.as_ptr() as usize
+    };
+    let _view = secret.read().unwrap();
+    assert_eq!(
+        perms_for(other_addr).as_deref(),
+        Some("---p"),
+        "unrelated secret must stay sealed while another is read"
+    );
+}
+
+/// Concurrency stress: many threads creating, writing, reading, and dropping
+/// their own secrets at once. Every thread must always observe exactly its
+/// own bytes — no cross-page interference, no protection-state races.
+#[test]
+fn concurrent_secrets_never_interfere() {
+    let handles: Vec<_> = (0u8..8)
+        .map(|t| {
+            std::thread::spawn(move || {
+                for round in 0u8..50 {
+                    let marker = t.wrapping_mul(31).wrapping_add(round);
+                    let mut secret = Secret::<128>::new_with(|b| b.fill(marker)).unwrap();
+                    {
+                        let v = secret.read().unwrap();
+                        assert!(v.iter().all(|&b| b == marker), "thread {t} round {round}");
+                    }
+                    {
+                        let mut w = secret.write().unwrap();
+                        w.fill(marker.wrapping_add(1));
+                    }
+                    let v = secret.read().unwrap();
+                    assert!(v.iter().all(|&b| b == marker.wrapping_add(1)));
+                }
+            })
+        })
+        .collect();
+    for h in handles {
+        h.join().unwrap();
+    }
+}
+
+/// Find the VmFlags line of the smaps block covering `addr`.
+#[cfg(target_os = "linux")]
+fn vm_flags_for(smaps: &str, addr: usize) -> Option<Vec<String>> {
+    let mut in_target_block = false;
+    for line in smaps.lines() {
+        if let Some((range, _)) = line.split_once(' ') {
+            if let Some((start, end)) = range.split_once('-') {
+                if let (Ok(s), Ok(e)) = (
+                    usize::from_str_radix(start, 16),
+                    usize::from_str_radix(end, 16),
+                ) {
+                    in_target_block = s <= addr && addr < e;
+                }
+            }
+        }
+        if in_target_block && line.starts_with("VmFlags:") {
+            return Some(
+                line.trim_start_matches("VmFlags:")
+                    .split_whitespace()
+                    .map(str::to_string)
+                    .collect(),
+            );
+        }
+    }
+    None
+}
+
+/// Permission string (`r--p`, `---p`, ...) of the mapping covering `addr`.
+#[cfg(target_os = "linux")]
+fn perms_for(addr: usize) -> Option<String> {
+    let maps = std::fs::read_to_string("/proc/self/maps").ok()?;
+    for line in maps.lines() {
+        let mut fields = line.split_whitespace();
+        let range = fields.next()?;
+        let perms = fields.next()?;
+        if let Some((start, end)) = range.split_once('-') {
+            if let (Ok(s), Ok(e)) = (
+                usize::from_str_radix(start, 16),
+                usize::from_str_radix(end, 16),
+            ) {
+                if s <= addr && addr < e {
+                    return Some(perms.to_string());
+                }
+            }
+        }
+    }
+    None
+}
