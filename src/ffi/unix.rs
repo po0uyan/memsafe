@@ -111,11 +111,13 @@ mod tests {
     }
 
     #[test]
-    fn munlock_error_on_overflowing_range() {
-        // Page-aligned start address + a length that overflows the address
-        // space is invalid on every POSIX platform.
+    fn munlock_error_on_unmapped_page() {
+        // Unlocking the top page of the address space fails with ENOMEM on
+        // both Linux and the BSDs/macOS: the range is never mapped. (A
+        // `usize::MAX` length is NOT used here: Linux page-aligns the length,
+        // which wraps it to zero, and a zero-length munlock succeeds.)
         let ptr = (usize::MAX & !(PAGE - 1)) as *mut u8;
-        let result = munlock(ptr, usize::MAX);
+        let result = munlock(ptr, PAGE);
         assert!(result.is_err());
     }
 
