@@ -1,6 +1,6 @@
+use crate::MemoryError;
 use crate::cell::Cell;
 use crate::mem_safe::{MemSafe, MemSafeRead, MemSafeWrite};
-use crate::MemoryError;
 
 /// A fixed-size secret stored entirely *inline* within a protected memory page.
 ///

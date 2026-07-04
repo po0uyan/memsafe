@@ -21,7 +21,7 @@ use std::{
     ops::{Deref, DerefMut},
 };
 
-use crate::{cell::Cell, MemoryError};
+use crate::{MemoryError, cell::Cell};
 
 /// Represents a memory state with no access permissions.
 #[cfg(unix)]

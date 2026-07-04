@@ -1,4 +1,4 @@
-use std::sync::atomic::{compiler_fence, Ordering};
+use std::sync::atomic::{Ordering, compiler_fence};
 
 /// Volatile, compiler-fenced zeroization of `*ptr`.
 ///

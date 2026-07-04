@@ -7,7 +7,7 @@ mod unix;
 use libc::{MAP_ANONYMOUS, MAP_PRIVATE, PROT_NONE, PROT_READ, PROT_WRITE};
 
 #[cfg(target_os = "linux")]
-use libc::{c_void, MADV_DONTDUMP};
+use libc::{MADV_DONTDUMP, c_void};
 
 #[cfg(windows)]
 mod win;

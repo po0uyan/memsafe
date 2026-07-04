@@ -32,8 +32,8 @@ impl Drop for SpySource {
 
 #[test]
 fn from_bytes_zeroizes_source_before_drop() {
-    use std::sync::atomic::Ordering;
     use std::sync::Arc;
+    use std::sync::atomic::Ordering;
 
     let flag = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let source = SpySource {
@@ -66,8 +66,8 @@ fn from_bytes_zeroizes_source_before_drop() {
 
 #[test]
 fn from_bytes_length_error_does_not_zeroize_source() {
-    use std::sync::atomic::Ordering;
     use std::sync::Arc;
+    use std::sync::atomic::Ordering;
 
     let flag = Arc::new(std::sync::atomic::AtomicBool::new(true));
     let source = SpySource {
