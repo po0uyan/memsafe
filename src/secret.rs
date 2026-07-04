@@ -73,8 +73,8 @@ impl<const N: usize> Secret<N> {
     /// which the bytes existed in unprotected memory.
     ///
     /// If `init` panics, the construction guard volatile-zeroes the page,
-    /// unlocks it, and unmaps it before the panic propagates — a partially
-    /// written secret can neither leak nor linger.
+    /// unlocks it, and unmaps it before the panic propagates; no partially
+    /// written secret remains in memory.
     pub fn new_with<F>(init: F) -> Result<Self, MemoryError>
     where
         F: FnOnce(&mut [u8; N]),
@@ -91,13 +91,14 @@ impl<const N: usize> Secret<N> {
     /// - On length mismatch (`source.len() > N`): source is returned untouched.
     /// - On memory-protection failure: source has already been zeroed.
     ///
-    /// Only the bytes exposed by [`AsMut::as_mut`] are zeroized. For containers
-    /// like `Vec` or `String`, capacity beyond `len` is not visited; call
-    /// [`Vec::shrink_to_fit`] / [`String::shrink_to_fit`] beforehand if that
-    /// matters for your threat model. Likewise, if the container ever *grew*
-    /// while holding secret bytes, earlier reallocations left copies on the
-    /// heap that this crate cannot reach — build the secret at its final size,
-    /// or better, write it directly into protected memory with [`Secret::new_with`].
+    /// Only the bytes exposed by [`AsMut::as_mut`] are zeroized; unused
+    /// capacity in a `Vec` or `String` is not visited. Call `shrink_to_fit`
+    /// first if trailing capacity may hold earlier secret content. The same
+    /// limitation applies to reallocation: a container that grew while
+    /// holding secret bytes freed its previous allocations unwiped, and
+    /// those copies are beyond this crate's reach. [`Secret::new_with`]
+    /// avoids both issues by never holding the secret in a growable
+    /// container.
     pub fn from_bytes<T: AsMut<[u8]>>(bytes: T) -> Result<Self, (T, MemoryError)> {
         Cell::<[u8; N]>::from_bytes(bytes).map(|cell| Secret {
             inner: MemSafe { cell },

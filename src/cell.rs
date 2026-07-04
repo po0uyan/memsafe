@@ -135,11 +135,12 @@ impl<T> Cell<T> {
         mem_wipe_on_fork(ptr, len)?;
 
         // Copy `value`'s bytes into the protected page, wipe the original
-        // through the same borrow, and only then `forget` it. The copy never
-        // passes through another function's stack frame, and the wipe writes
-        // through a pointer whose referent is still live at that point.
-        // Mark the guard `Written` between the copy and the wipe so a
-        // (hypothetical) panic in the wipe still triggers full cleanup.
+        // through the same borrow, then `forget` it. Ordering constraints:
+        // the bytes must not move through another function's stack frame
+        // (a copy there could never be wiped), the wipe must happen while
+        // `value` is still live, and `forget` must come last so the wiped
+        // value is never dropped. `Written` is marked between copy and
+        // wipe so a panic in between still wipes the page on rollback.
         let val_ptr = &mut value as *mut T;
         unsafe {
             std::ptr::copy_nonoverlapping(val_ptr as *const u8, ptr as *mut u8, len);
