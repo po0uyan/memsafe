@@ -1,3 +1,20 @@
+//! Compile-time enforced access states for protected memory.
+//!
+//! # Warning: heap-backed types are not protected
+//!
+//! This module's `MemSafe<T>` accepts any `T`, including `String` and
+//! `Vec<u8>`. For those types only the small header (pointer, length,
+//! capacity) lands in the protected page — the actual contents stay on the
+//! regular heap: swappable, dumpable, and not zeroed on free. Operations
+//! that grow the container (`push_str`, `push`, …) reallocate on the
+//! unprotected heap, and `Deref` makes it easy to `clone()` an unprotected
+//! copy out without noticing.
+//!
+//! **For secrets, use [`crate::Secret`], which stores every byte inline.**
+//! Use this module for non-secret data that benefits from `mlock` +
+//! `mprotect` semantics, with inline types (`[u8; N]`, integers, plain
+//! structs without heap pointers).
+
 use std::{
     convert::Infallible,
     marker::PhantomData,

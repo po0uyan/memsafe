@@ -73,8 +73,8 @@ impl<const N: usize> Secret<N> {
     /// which the bytes existed in unprotected memory.
     ///
     /// If `init` panics, the construction guard volatile-zeroes the page,
-    /// unlocks it, and unmaps it before the panic propagates — a partially
-    /// written secret can neither leak nor linger.
+    /// unlocks it, and unmaps it before the panic propagates; no partially
+    /// written secret remains in memory.
     pub fn new_with<F>(init: F) -> Result<Self, MemoryError>
     where
         F: FnOnce(&mut [u8; N]),
@@ -91,10 +91,14 @@ impl<const N: usize> Secret<N> {
     /// - On length mismatch (`source.len() > N`): source is returned untouched.
     /// - On memory-protection failure: source has already been zeroed.
     ///
-    /// Only the bytes exposed by [`AsMut::as_mut`] are zeroized. For containers
-    /// like `Vec` or `String`, capacity beyond `len` is not visited; call
-    /// [`Vec::shrink_to_fit`] / [`String::shrink_to_fit`] beforehand if that
-    /// matters for your threat model.
+    /// Only the bytes exposed by [`AsMut::as_mut`] are zeroized; unused
+    /// capacity in a `Vec` or `String` is not visited. Call `shrink_to_fit`
+    /// first if trailing capacity may hold earlier secret content. The same
+    /// limitation applies to reallocation: a container that grew while
+    /// holding secret bytes freed its previous allocations unwiped, and
+    /// those copies are beyond this crate's reach. [`Secret::new_with`]
+    /// avoids both issues by never holding the secret in a growable
+    /// container.
     pub fn from_bytes<T: AsMut<[u8]>>(bytes: T) -> Result<Self, (T, MemoryError)> {
         Cell::<[u8; N]>::from_bytes(bytes).map(|cell| Secret {
             inner: MemSafe { cell },
@@ -104,6 +108,11 @@ impl<const N: usize> Secret<N> {
     /// Obtain temporary read access to the secret bytes. The returned guard
     /// derefs to `&[u8; N]` and restores lowest-privilege access on drop
     /// (Unix).
+    ///
+    /// **Timing note:** comparing secret bytes with `==` is not
+    /// constant-time and can leak information through timing side channels.
+    /// If you compare secrets (password checks, MAC verification), use a
+    /// constant-time comparison such as the `subtle` crate's `ct_eq`.
     pub fn read(&mut self) -> Result<MemSafeRead<'_, [u8; N]>, MemoryError> {
         self.inner.read()
     }

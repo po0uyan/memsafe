@@ -4,11 +4,11 @@ use std::ops::{Deref, DerefMut};
 use crate::ffi::mem_noaccess;
 
 #[cfg(target_os = "linux")]
-use crate::ffi::mem_no_dump;
+use crate::ffi::{mem_no_dump, mem_wipe_on_fork};
 
 use crate::{
     ffi::{mem_alloc, mem_dealloc, mem_lock, mem_readonly, mem_readwrite, mem_unlock},
-    ptr_ops::{ptr_deref, ptr_deref_mut, ptr_drop_in_place, ptr_fill_zero, ptr_write, secure_zero},
+    ptr_ops::{ptr_deref, ptr_deref_mut, ptr_drop_in_place, ptr_fill_zero, secure_zero},
     MemoryError,
 };
 
@@ -96,7 +96,7 @@ impl<T> Drop for PartialCell<T> {
         if self.state == PartialState::Written {
             let _ = mem_readwrite(self.ptr, self.len);
             // `*self.ptr` holds a valid `T` written by `Cell::new`'s
-            // `ptr_write` or `Cell::new_with`'s `init` closure. The page
+            // byte copy or `Cell::new_with`'s `init` closure. The page
             // is RW (or has just been re-set RW above).
             ptr_drop_in_place(self.ptr);
             ptr_fill_zero(self.ptr);
@@ -115,6 +115,12 @@ impl<T> Drop for PartialCell<T> {
 impl<T> Cell<T> {
     pub fn new(mut value: T) -> Result<Cell<T>, MemoryError> {
         let len = std::mem::size_of::<T>();
+        if len == 0 {
+            return Err(MemoryError::from(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "zero-sized values cannot be placed in protected memory",
+            )));
+        }
         let ptr = mem_alloc(len)?;
         // From here on the page is owned by `guard`. Any `?` failure or
         // panic will roll back through `PartialCell::drop`.
@@ -125,16 +131,23 @@ impl<T> Cell<T> {
 
         #[cfg(target_os = "linux")]
         mem_no_dump(ptr, len)?;
+        #[cfg(target_os = "linux")]
+        mem_wipe_on_fork(ptr, len)?;
 
-        // Move `value` into the protected page, then wipe the caller's
-        // stack slot. `ptr_write` is a bitwise copy + `forget(src)`; the
-        // bytes at the original stack location persist until we zero them.
-        // Mark the guard `Written` between the move and the stack-wipe so
-        // a (hypothetical) panic in the wipe still triggers full cleanup.
+        // Copy `value`'s bytes into the protected page, wipe the original
+        // through the same borrow, then `forget` it. Ordering constraints:
+        // the bytes must not move through another function's stack frame
+        // (a copy there could never be wiped), the wipe must happen while
+        // `value` is still live, and `forget` must come last so the wiped
+        // value is never dropped. `Written` is marked between copy and
+        // wipe so a panic in between still wipes the page on rollback.
         let val_ptr = &mut value as *mut T;
-        ptr_write(ptr, value);
+        unsafe {
+            std::ptr::copy_nonoverlapping(val_ptr as *const u8, ptr as *mut u8, len);
+        }
         guard.mark_written();
         ptr_fill_zero(val_ptr);
+        std::mem::forget(value);
 
         #[cfg(windows)]
         mem_readonly(ptr, len)?;
@@ -190,6 +203,12 @@ impl<const N: usize> Cell<[u8; N]> {
         F: FnOnce(&mut [u8; N]),
     {
         let len = std::mem::size_of::<[u8; N]>();
+        if len == 0 {
+            return Err(MemoryError::from(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "zero-sized values cannot be placed in protected memory",
+            )));
+        }
         let ptr: *mut [u8; N] = mem_alloc(len)?;
         // From here on the page is owned by `guard`. Any `?` failure, or
         // a panic from `init`, will roll back through `PartialCell::drop`.
@@ -200,6 +219,8 @@ impl<const N: usize> Cell<[u8; N]> {
 
         #[cfg(target_os = "linux")]
         mem_no_dump(ptr, len)?;
+        #[cfg(target_os = "linux")]
+        mem_wipe_on_fork(ptr, len)?;
 
         // Mark `Written` *before* invoking `init`: the closure may write
         // partial secret bytes and then panic. `[u8; N]` has trivial
@@ -262,10 +283,18 @@ impl<T> DerefMut for Cell<T> {
 
 impl<T> Drop for Cell<T> {
     fn drop(&mut self) {
-        mem_readwrite(self.ptr, std::mem::size_of::<T>()).unwrap();
+        let len = std::mem::size_of::<T>();
+        // Fail secure: if the page can't be made writable it can't be wiped,
+        // so leak it — still mapped, locked, and sealed — rather than return
+        // a dirty page to the OS for reuse by the next allocation. This also
+        // keeps drop from panicking, which would abort the process when a
+        // panic is already unwinding.
+        if mem_readwrite(self.ptr, len).is_err() {
+            return;
+        }
         ptr_drop_in_place(self.ptr);
         ptr_fill_zero(self.ptr);
-        mem_unlock(self.ptr, std::mem::size_of::<T>()).unwrap();
-        mem_dealloc(self.ptr, std::mem::size_of::<T>()).unwrap();
+        let _ = mem_unlock(self.ptr, len);
+        let _ = mem_dealloc(self.ptr, len);
     }
 }
