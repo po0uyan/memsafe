@@ -24,3 +24,10 @@ libc = { version = "0.2" }
 winapi = { version = "0.3", features = ["memoryapi", "winnt"] }
 
 [dependencies]
+
+[dev-dependencies]
+criterion = "0.5"
+
+[[bench]]
+name = "memsafe_bench"
+harness = false
