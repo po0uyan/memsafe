@@ -172,6 +172,12 @@ jobs:
     needs: test
     if: github.event_name == 'push'  # Runs only when merged into main
     runs-on: ubuntu-latest
+    # Merging several PRs in quick succession starts one release job per
+    # merge. Without this they race each other pushing the version bump and
+    # all but one fail with non-fast-forward. Queue them instead.
+    concurrency:
+      group: release-main
+      cancel-in-progress: false
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -179,26 +185,44 @@ jobs:
           ssh-key: ${{ secrets.DEPLOY_KEY }}
           fetch-depth: 0  # Ensure we fetch all history
 
+      # A queued release job may start on a commit that is no longer the tip
+      # (more merges landed, or an earlier job already released them all).
+      # Sync to the real tip, and if the tip is already a version-bump commit
+      # there is nothing left to release.
+      - name: Sync with main and check for unreleased work
+        id: gate
+        run: |
+          git pull --rebase origin main
+          if git log -1 --pretty=%B | grep -q '\[skip ci\]'; then
+            echo "Tip is already a release commit; nothing to release."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Set up Rust
+        if: steps.gate.outputs.skip != 'true'
         uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: stable
 
       - name: Install dependencies
+        if: steps.gate.outputs.skip != 'true'
         run: |
           sudo apt-get update
           sudo apt-get install -y build-essential
 
       - name: Build
+        if: steps.gate.outputs.skip != 'true'
         run: cargo build --release --verbose
 
       - name: Check package version
+        if: steps.gate.outputs.skip != 'true'
         id: check_version
         run: echo "VERSION=$(cargo metadata --format-version 1 --no-deps | jq -r '.packages[0].version')" >> $GITHUB_ENV
 
       - name: Extract PR Number from Merge Commit
+        if: steps.gate.outputs.skip != 'true'
         run: |
-          PR_NUMBER=$(git log -1 --pretty=%B | grep -oE 'Merge pull request #[0-9]+' | awk '{print $4}' | tr -d '#')
+          PR_NUMBER=$(git log --grep='Merge pull request #' -1 --pretty=%B | grep -oE 'Merge pull request #[0-9]+' | awk '{print $4}' | tr -d '#')
 
           if [ -z "$PR_NUMBER" ]; then
             echo "❌ Error: Could not determine PR number!"
@@ -209,6 +233,7 @@ jobs:
           echo "PR_NUMBER=$PR_NUMBER" >> $GITHUB_ENV
 
       - name: Fetch PR Labels Using GitHub API
+        if: steps.gate.outputs.skip != 'true'
         env:
           RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN }}
         run: |
@@ -238,6 +263,7 @@ jobs:
           
 
       - name: Determine Version Bump
+        if: steps.gate.outputs.skip != 'true'
         run: |
           if [[ "${{ env.VERSION_PART }}" == "major" ]]; then
             NEW_VERSION=$(echo "${{ env.VERSION }}" | awk -F. -v OFS=. '{$1 += 1 ; $2=0; $3=0; print}')
@@ -250,9 +276,11 @@ jobs:
           echo "NEW_VERSION=$NEW_VERSION" >> $GITHUB_ENV
 
       - name: Update Cargo.toml with new version
+        if: steps.gate.outputs.skip != 'true'
         run: sed -i 's/^version = "[0-9]\+\.[0-9]\+\.[0-9]\+"/version = "${{ env.NEW_VERSION }}"/' Cargo.toml
 
       - name: Commit and push new version (Bypass Branch Protection)
+        if: steps.gate.outputs.skip != 'true'
         env:
           RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN }}
         run: |
@@ -264,6 +292,7 @@ jobs:
 
 
       - name: Tag version and push
+        if: steps.gate.outputs.skip != 'true'
         env:
           RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN }}
         run: |
@@ -271,11 +300,13 @@ jobs:
           git push origin "v${{ env.NEW_VERSION }}"
 
       - name: Publish to Crates.io
+        if: steps.gate.outputs.skip != 'true'
         env:
           CARGO_REGISTRY_TOKEN: ${{ secrets.CRATES_IO_TOKEN }}
         run: cargo publish --token $CARGO_REGISTRY_TOKEN
 
       - name: Create GitHub Release
+        if: steps.gate.outputs.skip != 'true'
         uses: softprops/action-gh-release@v2.2.1
         with:
           token: ${{ secrets.RELEASE_TOKEN }}
