@@ -94,7 +94,10 @@ impl<const N: usize> Secret<N> {
     /// Only the bytes exposed by [`AsMut::as_mut`] are zeroized. For containers
     /// like `Vec` or `String`, capacity beyond `len` is not visited; call
     /// [`Vec::shrink_to_fit`] / [`String::shrink_to_fit`] beforehand if that
-    /// matters for your threat model.
+    /// matters for your threat model. Likewise, if the container ever *grew*
+    /// while holding secret bytes, earlier reallocations left copies on the
+    /// heap that this crate cannot reach — build the secret at its final size,
+    /// or better, write it directly into protected memory with [`Secret::new_with`].
     pub fn from_bytes<T: AsMut<[u8]>>(bytes: T) -> Result<Self, (T, MemoryError)> {
         Cell::<[u8; N]>::from_bytes(bytes).map(|cell| Secret {
             inner: MemSafe { cell },
@@ -104,6 +107,11 @@ impl<const N: usize> Secret<N> {
     /// Obtain temporary read access to the secret bytes. The returned guard
     /// derefs to `&[u8; N]` and restores lowest-privilege access on drop
     /// (Unix).
+    ///
+    /// **Timing note:** comparing secret bytes with `==` is not
+    /// constant-time and can leak information through timing side channels.
+    /// If you compare secrets (password checks, MAC verification), use a
+    /// constant-time comparison such as the `subtle` crate's `ct_eq`.
     pub fn read(&mut self) -> Result<MemSafeRead<'_, [u8; N]>, MemoryError> {
         self.inner.read()
     }

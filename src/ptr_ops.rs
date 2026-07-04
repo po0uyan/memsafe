@@ -1,9 +1,5 @@
 use std::sync::atomic::{compiler_fence, Ordering};
 
-pub fn ptr_write<T>(ptr: *mut T, val: T) {
-    unsafe { ptr.write(val) };
-}
-
 /// Volatile, compiler-fenced zeroization of `*ptr`.
 ///
 /// Writes `size_of::<T>()` zero bytes through `ptr` using `write_volatile`,

@@ -288,3 +288,14 @@ pub fn mem_unlock<T>(ptr: *mut T, len: usize) -> Result<(), MemoryError> {
 pub fn mem_no_dump<T>(ptr: *mut T, len: usize) -> Result<(), MemoryError> {
     unix::madvice(ptr as *mut c_void, len, MADV_DONTDUMP)
 }
+
+/// Tells the kernel to zero this memory range in any forked child.
+///
+/// Without this, `fork()` gives the child a copy-on-write copy of the secret
+/// page *without* the `mlock` — an unlocked, swappable copy in a process that
+/// may not know it holds one. `MADV_WIPEONFORK` (Linux 4.14+) makes the
+/// kernel replace the child's view of the range with zero-filled pages.
+#[cfg(target_os = "linux")]
+pub fn mem_wipe_on_fork<T>(ptr: *mut T, len: usize) -> Result<(), MemoryError> {
+    unix::madvice(ptr as *mut c_void, len, libc::MADV_WIPEONFORK)
+}

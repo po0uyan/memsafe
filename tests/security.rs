@@ -205,3 +205,75 @@ fn mlock_failure_rolls_back_cleanly() {
         "locking 4 TiB must fail with a MemoryError"
     );
 }
+
+/// True when the tests run under a user-mode emulator (the cross/qemu CI
+/// targets), where fork+madvise semantics don't match a real kernel.
+#[cfg(target_os = "linux")]
+fn emulated_kernel() -> bool {
+    std::env::vars().any(|(k, _)| {
+        k == "QEMU_LD_PREFIX"
+            || k == "CROSS_RUNNER"
+            || (k.starts_with("CARGO_TARGET_") && k.ends_with("_RUNNER"))
+    })
+}
+
+/// `MADV_WIPEONFORK` enforcement: a forked child must see a zeroed page, not
+/// a copy of the secret. Without it, fork() hands the child an *unlocked*
+/// copy-on-write copy of the secret that can be swapped or dumped.
+///
+/// The parent holds a read guard across the fork so the page is readable in
+/// both processes; the child inspects its copy and reports through its exit
+/// code. The child only calls async-signal-safe things (volatile reads,
+/// `_exit`) because forking a threaded test runner allows nothing more.
+#[cfg(target_os = "linux")]
+#[test]
+fn forked_child_sees_wiped_secret() {
+    if emulated_kernel() {
+        eprintln!("skipping: qemu user-mode emulation does not reproduce fork/madvise semantics");
+        return;
+    }
+
+    let mut secret = Secret::<32>::new_with(|buf| buf.fill(0xAB)).unwrap();
+    let view = secret.read().unwrap(); // page readable across the fork
+    let ptr = view.as_ptr();
+
+    match unsafe { libc::fork() } {
+        0 => {
+            // Child: every byte must be zero. Exit 0 on success, 42 if any
+            // secret byte survived the fork.
+            for i in 0..32 {
+                if unsafe { std::ptr::read_volatile(ptr.add(i)) } != 0 {
+                    unsafe { libc::_exit(42) };
+                }
+            }
+            unsafe { libc::_exit(0) };
+        }
+        pid if pid > 0 => {
+            let mut status = 0;
+            let waited = unsafe { libc::waitpid(pid, &mut status, 0) };
+            assert_eq!(waited, pid, "waitpid failed");
+            assert!(
+                libc::WIFEXITED(status),
+                "child did not exit normally: {status}"
+            );
+            assert_eq!(
+                libc::WEXITSTATUS(status),
+                0,
+                "forked child must see a kernel-zeroed page, not the secret"
+            );
+            // Parent's own copy is untouched.
+            drop(view);
+            assert_eq!(secret.read().unwrap()[0], 0xAB);
+        }
+        _ => panic!("fork failed"),
+    }
+}
+
+/// Zero-sized secrets are rejected up front with a clear error instead of a
+/// raw EINVAL surfacing from mmap.
+#[test]
+fn zero_sized_secret_is_rejected() {
+    let result = Secret::<0>::new_with(|_| {});
+    let err = result.err().expect("Secret::<0> must be rejected");
+    assert_eq!(err.inner().kind(), std::io::ErrorKind::InvalidInput);
+}
