@@ -51,7 +51,7 @@ mmap ──▶ mlock ──▶ MADV_DONTDUMP ──▶ write in place ──▶ 
 
 A few things that may help you evaluate the crate. The public API needs no `unsafe` on your side. There are two dependencies, both platform-gated (`libc` on Unix, `winapi` on Windows). The test suite includes tests where the kernel itself verifies the page sealing: a child process reads the sealed page and must die by SIGSEGV for the test to pass. And the [threat model](#threat-model) below spells out what this crate does *not* protect against, which for a security library matters as much as what it does.
 
-**Contents** — [Quick start](#quick-start) · [Going deeper](#going-deeper) · [What you get](#what-you-get) · [How it compares](#how-it-compares) · [Threat model](#threat-model) · [Platform notes](#platform-specific-notes) · [Under the hood](#under-the-hood) · [Roadmap](#roadmap)
+**Contents** — [Quick start](#quick-start) · [Going deeper](#going-deeper) · [What you get](#what-you-get) · [How it compares](#how-it-compares) · [Performance](#performance) · [Threat model](#threat-model) · [Platform notes](#platform-specific-notes) · [Under the hood](#under-the-hood) · [Roadmap](#roadmap)
 
 ---
 
@@ -218,6 +218,27 @@ There are several good crates in this space, and they solve different layers of 
 | Source returned on constructor failure | — | — | — | — | ✅ |
 
 These combine well rather than compete. `zeroize` and `secrecy` are the right tools for secrets that have to live in ordinary structs. `memsec` and `region` are the right tools if you want to build your own container. memsafe is for when you want the container already built.
+
+## Performance
+
+Protection isn't free, and it's better to know the cost up front than to discover it in a profile. Construction does about five syscalls (`mmap`, `mlock`, `madvise` twice on Linux, `mprotect`), and every guard cycle is two `mprotect` calls. Measured with the criterion benches in [`benches/`](benches/memsafe_bench.rs) on an Apple Silicon macOS machine, release build:
+
+| Operation | with memsafe | plain heap (`Vec<u8>`) |
+|---|---|---|
+| Create + drop a 64 B secret | ~2.8 µs | ~9.5 ns |
+| Create + drop a 4 KiB secret | ~3.8 µs | — |
+| Ingest an owned `Vec` (`from_bytes`, 64 B) | ~2.9 µs | — |
+| Read access (unseal, read, reseal) | ~1.1 µs | ~0.35 ns |
+| Write access (unseal, write, reseal) | ~1.1 µs | — |
+
+So a protected secret costs roughly 300× a plain allocation to create, and each access costs about a microsecond. Two things follow from that:
+
+- **For credentials, keys, and tokens this is noise.** An API key read a few times per process lifetime costs single-digit microseconds in total.
+- **Don't put a per-request hot loop behind a guard cycle.** If you need the secret thousands of times per second, take one guard and do the batch inside it (the page stays readable for exactly that scope), rather than opening and dropping a guard per operation.
+
+Also note the memory cost: each secret occupies at least one OS page (typically 4 KiB) and counts against the locked-memory limit (`RLIMIT_MEMLOCK`), so size is effectively free up to a page but the number of live secrets is not unbounded.
+
+Absolute numbers are dominated by syscall cost and will differ on your OS and hardware — `cargo bench` reproduces the table for your machine.
 
 ## Threat model
 
