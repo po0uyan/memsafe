@@ -5,7 +5,7 @@
 //! are the per-operation overhead and how it compares to an unprotected
 //! heap buffer. The `baseline_*` benches exist for that comparison.
 
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use criterion::{Criterion, black_box, criterion_group, criterion_main};
 use memsafe::Secret;
 
 fn construction(c: &mut Criterion) {

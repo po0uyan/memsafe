@@ -7,9 +7,9 @@ use crate::ffi::mem_noaccess;
 use crate::ffi::{mem_no_dump, mem_wipe_on_fork};
 
 use crate::{
+    MemoryError,
     ffi::{mem_alloc, mem_dealloc, mem_lock, mem_readonly, mem_readwrite, mem_unlock},
     ptr_ops::{ptr_deref, ptr_deref_mut, ptr_drop_in_place, ptr_fill_zero, secure_zero},
-    MemoryError,
 };
 
 // No `Debug`: this crate withholds `Debug` from every type that participates
