@@ -39,19 +39,18 @@ mmap ──▶ mlock ──▶ MADV_DONTDUMP ──▶ write in place ──▶ 
 ```
 <sub>¹ Linux only. See [platform notes](#platform-specific-notes) for what each OS actually provides.</sub>
 
-### Compared to a plain `String`
-
 | | plain `String` | `memsafe::Secret` |
 |---|---|---|
 | Swap under memory pressure | may be paged to disk | stays in RAM — page is `mlock`'d |
 | Core dumps | included | excluded on Linux (`MADV_DONTDUMP`) |
-| While your code isn't using it | readable through any stray pointer or overflow | page is `PROT_NONE` on Unix — even your own process faults on access (`PAGE_READONLY` on Windows) |
-| Bytes after drop | linger on the freed heap | volatile-zeroed + compiler-fenced — the optimizer cannot elide the wipe |
-| A stray `{:?}` in a log line | leaks it | does not compile — `Secret` has no `Debug`, no `Display` |
+| Inherited by `fork()` children | as-is | kernel-zeroed on Linux (`MADV_WIPEONFORK`) |
+| While your code isn't using it | readable through any stray pointer | `PROT_NONE` on Unix — even your own process faults (`PAGE_READONLY` on Windows) |
+| Bytes after drop | linger on the freed heap | volatile-zeroed + compiler-fenced |
+| A stray `{:?}` in a log line | leaks it | does not compile |
 
-A few things that may help you evaluate the crate. The public API needs no `unsafe` on your side. There are two dependencies, both platform-gated (`libc` on Unix, `winapi` on Windows). The test suite includes tests where the kernel itself verifies the page sealing: a child process reads the sealed page and must die by SIGSEGV for the test to pass. And the [threat model](#threat-model) below spells out what this crate does *not* protect against, which for a security library matters as much as what it does.
+A few facts for evaluating the crate: the public API needs no `unsafe` on your side, there are two platform-gated dependencies (`libc` / `winapi`), the test suite includes tests where the kernel itself verifies the sealing (a child process must die by SIGSEGV), and the [threat model](#threat-model) states what this crate does *not* protect against. In the wild: [spg](https://github.com/po0uyan/rust-secure-pass-gen), a CLI password generator, keeps every generated password in memsafe-protected pages.
 
-**Contents** — [Quick start](#quick-start) · [Going deeper](#going-deeper) · [What you get](#what-you-get) · [How it compares](#how-it-compares) · [Performance](#performance) · [Threat model](#threat-model) · [Platform notes](#platform-specific-notes) · [Under the hood](#under-the-hood) · [Roadmap](#roadmap)
+**Contents** — [Quick start](#quick-start) · [Going deeper](#going-deeper) · [How it compares](#how-it-compares) · [Performance](#performance) · [Threat model](#threat-model) · [Platform notes](#platform-specific-notes) · [Under the hood](#under-the-hood) · [Roadmap](#roadmap)
 
 ---
 
@@ -61,61 +60,39 @@ A few things that may help you evaluate the crate. The public API needs no `unsa
 cargo add memsafe
 ```
 
-Store an API key, password, or token in a `Secret<N>`. `N` is the buffer size; pick one large enough for your secret, unused bytes stay zero:
+Store an API key, password, or token in a `Secret<N>`. `N` is the buffer size; unused bytes stay zero. The closure writes straight into protected memory — the same pattern reads directly from stdin or any `Read` source, so the secret never has to exist anywhere else:
 
 ```rust
 use memsafe::Secret;
 
-// Write the secret straight into protected memory — it never exists
-// on the regular heap or in a stack temporary.
 let mut secret = Secret::<64>::new_with(|buf| {
     buf[..10].copy_from_slice(b"my-api-key");
 }).unwrap();
 
-// Read it back through a guard. The page is unlocked only while
-// `view` is alive, and re-sealed the moment it drops.
+// The page is unlocked only while `view` is alive, re-sealed when it drops.
 let view = secret.read().unwrap();
 assert_eq!(&view[..10], b"my-api-key");
 ```
 
-If the secret already sits in a `String` or `Vec<u8>`, hand it over. The source gets volatile-zeroed after the copy, so no readable trace stays behind:
+If the secret already sits in a `String` or `Vec<u8>`, hand it over — the source gets volatile-zeroed after the copy:
 
 ```rust
-use memsafe::Secret;
-
 let key = b"my-api-key".to_vec();
 let mut secret = Secret::<64>::from_bytes(key).unwrap();
 
-// Or via TryFrom:
-let mut secret: Secret<64> = String::from("my-api-key").try_into().unwrap();
+// Or: let mut secret: Secret<64> = String::from("my-api-key").try_into().unwrap();
 ```
 
-Reading a password straight from stdin, without it ever touching a `String`:
+Construction can fail (buffer too small, `mlock` limit hit). The owned-input constructors give you the source back along with the error instead of eating it:
 
 ```rust
-use memsafe::Secret;
-use std::io::Read;
-
-let mut secret = Secret::<256>::new_with(|buf| {
-    let _ = std::io::stdin().read(&mut buf[..]).unwrap();
-}).unwrap();
-```
-
-Construction can fail (buffer too small, `mlock` limit hit). When it does, the owned-input constructors give you the source back along with the error instead of eating it:
-
-```rust
-use memsafe::Secret;
-
-let too_long = String::from("way-too-long-to-fit-in-this-buffer");
-match Secret::<4>::try_from(too_long) {
+match Secret::<4>::try_from(String::from("way-too-long")) {
     Ok(_) => unreachable!(),
-    Err((source, err)) => {
-        eprintln!("could not encapsulate ({err}); got back {} bytes", source.len());
-    }
+    Err((source, err)) => eprintln!("failed ({err}); got back {} bytes", source.len()),
 }
 ```
 
-If all you need is a secret guard, that's the whole API. The rest of this document is detail.
+If all you need is a secret guard, that's the whole API. The rest is detail.
 
 ---
 
@@ -126,199 +103,130 @@ The crate exports two types:
 | Type | Use it for |
 |------|------------|
 | **`Secret<N>`** | **Secrets.** Every constructor keeps all `N` bytes inline inside the protected page; the heap-pointer pitfall is unrepresentable. |
-| **`MemSafe<T>`** | **Non-secret protected memory.** Any `T` that wants `mlock` + `mprotect` semantics — FFI scratch buffers, guard regions, data you want fault-on-touch while idle. |
+| **`MemSafe<T>`** | **Non-secret protected memory.** Any `T` that wants `mlock` + `mprotect` semantics. |
 
 ### `Secret<N>` constructors
 
 | Constructor | Input | Source returned on error | Source zeroized |
 |-------------|-------|--------------------------|-----------------|
-| `Secret::<N>::new_with(F)` (`F: FnOnce(&mut [u8; N])`) | (closure writes in place) | N/A — no source | N/A — no source |
-| `Secret::<N>::from_bytes(T)` (`T: AsMut<[u8]>`) | Owned bytes | **Yes**, with the error | **Yes** — `len` bytes overwritten before drop |
-| `<Secret<N> as TryFrom<String>>::try_from` | Owned `String` | **Yes**, with the error | **Yes** — via `from_bytes` on `into_bytes()` |
-| `<Secret<N> as TryFrom<&str>>::try_from` | Borrowed | N/A — borrow returned to caller | No (caller-managed) |
+| `new_with(F)` (`F: FnOnce(&mut [u8; N])`) | closure writes in place | N/A | N/A |
+| `from_bytes(T)` (`T: AsMut<[u8]>`) | owned bytes | **yes**, with the error | **yes**, before drop |
+| `TryFrom<String>` | owned `String` | **yes**, with the error | **yes** |
+| `TryFrom<&str>` | borrowed | N/A — borrow stays yours | no (caller-managed) |
 
-> **Capacity vs. length on `Vec` / `String`.** `from_bytes` only zeroes the bytes exposed by `AsMut::as_mut`, which is `len`, not `capacity`. If your `Vec` or `String` has unused trailing capacity that may have held earlier secret content, call `shrink_to_fit()` before passing it in.
+> `from_bytes` zeroes what `AsMut::as_mut` exposes — `len`, not `capacity`. Call `shrink_to_fit()` first if trailing capacity may hold earlier secret content, and prefer `new_with` over containers that ever grew while holding the secret (old reallocations are out of reach).
 
-### `MemSafe<T>` — the general-purpose protected container
+### `MemSafe<T>`
 
-`MemSafe<T>` is the lower-level building block: a protected memory region holding any `T`. It does **not** carry the secret-handling machinery — no `from_bytes`, no `TryFrom`, no source zeroization.
+The lower-level building block: a protected region holding any `T`, accessed through `read()` / `write()` guards. No secret-handling machinery.
 
-```rust
-use memsafe::MemSafe;
+> **Why not `MemSafe<String>` for a password?** A `String` keeps its bytes on the regular heap; wrapping it protects only the 24-byte header. The secret stays swappable, dumpable, and unwiped. `Secret<N>` exists to make that mistake unrepresentable — it can only wrap `[u8; N]`.
 
-let mut buffer = MemSafe::new([0_u8; 32]).unwrap();
+### Type-state API
 
-{
-    let mut write = buffer.write().unwrap();
-    write[..14].copy_from_slice(b"working-buffer");
-}
-{
-    let read = buffer.read().unwrap();
-    println!("data: {:02X?}", *read);
-}
-```
-
-> **Why not just use `MemSafe<String>` for a password?** Because it doesn't do what it looks like it does. A `String` keeps its bytes on the regular `malloc` heap; wrapping it in `MemSafe` only protects the 24-byte header (pointer, length, capacity). The actual secret stays on the unprotected heap: swappable, dumpable, and not zeroed when freed. This is exactly the mistake `Secret<N>` is designed to rule out, since it can only wrap `[u8; N]` and there is no indirection to get wrong.
-
-### Type-state API — access states checked by the compiler
-
-With the `type-state` feature, the buffer's access state is carried in the type, so reading a no-access buffer or writing through a read-only handle is a *compile-time* error:
-
-```shell
-cargo add memsafe --features type-state
-```
+With the `type-state` feature (`cargo add memsafe --features type-state`), the buffer's access state lives in the type, so reading a no-access buffer is a *compile-time* error:
 
 ```rust
 use memsafe::type_state::MemSafe;
 
-// initialize a 32-byte buffer in no-access state
-let secret = MemSafe::new([0_u8; 32]).unwrap();
-
-// transition to read-write and write into it
-let info = "my-secret-info";
-let mut secret = secret.read_write().unwrap();
-secret[..info.len()].copy_from_slice(info.as_bytes());
-
-// transition to read-only and read from it
-let secret = secret.read_only().unwrap();
-println!("Secure data: {:02X?}", *secret);
+let secret = MemSafe::new([0_u8; 32]).unwrap(); // no-access
+let mut secret = secret.read_write().unwrap();  // now writable
+secret[..4].copy_from_slice(b"data");
+let secret = secret.read_only().unwrap();       // now read-only
 ```
 
-> `Secret<N>` does not yet have a type-state variant — secret bytes go through the runtime-state `Secret` API regardless of the `type-state` feature. If you want compile-time-enforced access state on a secret, open an issue or PR; the building blocks (`Cell` + `type_state::MemSafe`) are already in place.
-
-## What you get
-
-| Property | How it's enforced |
-|----------|-------------------|
-| Not paged to disk | `mlock` (Unix) / `VirtualLock` (Windows) on the backing page |
-| Not in core dumps | `madvise(MADV_DONTDUMP)` — **Linux only** |
-| Zeroed in forked children | `madvise(MADV_WIPEONFORK)` — **Linux only**; the kernel wipes the child's copy of the page |
-| Inaccessible between operations | `mprotect(PROT_NONE)` on Unix; `PAGE_READONLY` on Windows (the strictest level Windows offers in this model) |
-| Zero-on-drop | Byte-wise `write_volatile` + `compiler_fence(SeqCst)` over the page immediately before `munmap` / `VirtualFree` |
-| No allocator round-trip | Bytes are copied straight from the source into the protected page; they never reach the regular `malloc` heap |
-| Source zeroization | `Secret::from_bytes(T)` volatile-overwrites the source byte slice before drop, for any `T: AsMut<[u8]>` |
-| Recoverable on error | `Secret` constructors return the original source alongside the error so the caller can retry, inspect, or further zeroize it |
-| In-place initialization | `Secret::new_with` lets a closure write straight into the protected page — the secret never visits a stack temporary or the regular heap |
-| No `Debug`, no `Display` | `Secret` implements neither, so a stray `{:?}` in a log line cannot leak it |
-| Heap-pointer pitfall unrepresentable | `Secret<N>` only ever wraps `[u8; N]` — by construction it is impossible to protect a header while leaving the payload on the unprotected heap |
-| Compile-time access enforcement | Optional, behind the `type-state` feature |
+`Secret<N>` doesn't have a type-state variant yet; issues and PRs welcome.
 
 ## How it compares
 
-There are several good crates in this space, and they solve different layers of the problem. Where memsafe fits: it automates the OS-level protections behind a typed API, instead of giving you primitives or a wrapper type alone.
-
 | Capability | [`zeroize`](https://crates.io/crates/zeroize) | [`secrecy`](https://crates.io/crates/secrecy) | [`memsec`](https://crates.io/crates/memsec) | [`region`](https://crates.io/crates/region) | `memsafe` |
 |---|---|---|---|---|---|
-| Elision-resistant zero-on-drop | ✅ | ✅ (via zeroize) | manual (`memzero`) | — | ✅ automatic |
+| Elision-resistant zero-on-drop | ✅ | ✅ (via zeroize) | manual | — | ✅ automatic |
 | Locked out of swap (`mlock`) | — | — | manual | manual | ✅ automatic |
-| Page inaccessible between uses (`mprotect`) | — | — | manual | manual | ✅ automatic per-access |
+| Page sealed between uses (`mprotect`) | — | — | manual | manual | ✅ automatic |
 | Core-dump exclusion | — | — | via its `mlock` (Linux) | — | ✅ automatic (Linux) |
-| Secret bytes kept off the global heap | — | — | your responsibility | your responsibility | ✅ by construction (`Secret<N>`) |
-| Safe API (no `unsafe` for the caller) | ✅ | ✅ | ❌ raw primitives | ✅ | ✅ |
+| Secret bytes kept off the global heap | — | — | your responsibility | your responsibility | ✅ by construction |
+| Safe API (no `unsafe` for the caller) | ✅ | ✅ | ❌ | ✅ | ✅ |
 | Source returned on constructor failure | — | — | — | — | ✅ |
 
-These combine well rather than compete. `zeroize` and `secrecy` are the right tools for secrets that have to live in ordinary structs. `memsec` and `region` are the right tools if you want to build your own container. memsafe is for when you want the container already built.
+These combine well rather than compete: `zeroize`/`secrecy` for secrets in ordinary structs, `memsec`/`region` for building your own container, memsafe when you want the container already built.
 
 ## Performance
 
-Protection isn't free, and it's better to know the cost up front than to discover it in a profile. Construction does about five syscalls (`mmap`, `mlock`, `madvise` twice on Linux, `mprotect`), and every guard cycle is two `mprotect` calls. Measured with the criterion benches in [`benches/`](benches/memsafe_bench.rs) on an Apple Silicon macOS machine, release build:
+Construction is about five syscalls; every guard cycle is two `mprotect` calls. Measured with the criterion benches in [`benches/`](benches/memsafe_bench.rs) (Apple Silicon, release build) — `cargo bench` reproduces this table on your machine:
 
 | Operation | with memsafe | plain heap (`Vec<u8>`) |
 |---|---|---|
 | Create + drop a 64 B secret | ~2.8 µs | ~9.5 ns |
 | Create + drop a 4 KiB secret | ~3.8 µs | — |
-| Ingest an owned `Vec` (`from_bytes`, 64 B) | ~2.9 µs | — |
+| Ingest a `Vec` (`from_bytes`, 64 B) | ~2.9 µs | — |
 | Read access (unseal, read, reseal) | ~1.1 µs | ~0.35 ns |
 | Write access (unseal, write, reseal) | ~1.1 µs | — |
 
-So a protected secret costs roughly 300× a plain allocation to create, and each access costs about a microsecond. Two things follow from that:
-
-- **For credentials, keys, and tokens this is noise.** An API key read a few times per process lifetime costs single-digit microseconds in total.
-- **Don't put a per-request hot loop behind a guard cycle.** If you need the secret thousands of times per second, take one guard and do the batch inside it (the page stays readable for exactly that scope), rather than opening and dropping a guard per operation.
-
-Also note the memory cost: each secret occupies at least one OS page (typically 4 KiB) and counts against the locked-memory limit (`RLIMIT_MEMLOCK`), so size is effectively free up to a page but the number of live secrets is not unbounded.
-
-Absolute numbers are dominated by syscall cost and will differ on your OS and hardware — `cargo bench` reproduces the table for your machine.
+For credentials and keys this is noise. For a hot loop it isn't: take one guard and do the batch inside it rather than opening a guard per operation. Each secret also occupies a full page (typically 4 KiB) and counts against `RLIMIT_MEMLOCK`, so the number of live secrets is bounded, not their size.
 
 ## Threat model
 
 We list this explicitly because vague "secure" claims are how secrets get leaked.
 
-**memsafe is designed to defend against:**
+**Designed to defend against:**
 
-- Secrets being written to disk via swap (mitigated by `mlock` / `VirtualLock`).
-- Secrets appearing in a Linux core dump (mitigated by `madvise(MADV_DONTDUMP)`).
-- The Rust / system allocator handing freed-but-not-zeroed bytes to a later caller (mitigated by zero-on-drop and by never routing the secret through the global allocator).
-- Accidental reads or writes while the buffer is logically inactive (mitigated by `mprotect` / `VirtualProtect` between operations and, optionally, by the type-state API).
-- The "owned bytes" case: the secret being silently left on the regular heap after the source is dropped (mitigated by `Secret::from_bytes`'s explicit volatile zeroization of the source slice before drop).
-- The "wrong wrapper" case: a developer wrapping a `String` or `Vec<u8>` in `MemSafe` and unknowingly leaving the payload on the unprotected heap (mitigated structurally by `Secret<N>` — by construction it can only wrap `[u8; N]`, where the secret lives inline).
-- A forked child inheriting a copy of the secret — **Linux only**, via `madvise(MADV_WIPEONFORK)`: the kernel replaces the child's view of the page with zeros. On other Unixes the child still receives an unlocked copy-on-write copy; see below.
+- Secrets reaching disk via swap (`mlock` / `VirtualLock`).
+- Secrets in Linux core dumps (`MADV_DONTDUMP`).
+- A forked child inheriting an unlocked copy of the secret — **Linux only**, via `MADV_WIPEONFORK`.
+- The allocator handing freed-but-unwiped bytes to a later caller (zero-on-drop; the secret never routes through the global allocator).
+- Reads or writes while the buffer is logically inactive (`mprotect` between operations).
+- Owned sources silently left on the heap after ingestion (`from_bytes` volatile-zeroizes them).
+- The wrong-wrapper mistake — `MemSafe<String>` protecting only a header (`Secret<N>` makes it unrepresentable).
 
-**memsafe does NOT defend against:**
+**NOT defended against:**
 
-- A process running with privilege equivalent to or greater than your own — for example, a debugger attached via `ptrace`, or root on the same machine. OS protection ends at the process boundary.
-- **Hibernation (suspend-to-disk).** The hibernation image contains all of physical RAM, *including* `mlock`'d pages — `mlock` prevents swapping, not hibernation. If laptops are in your threat model, pair this crate with encrypted swap/hibernation or full-disk encryption.
-- **`fork()` inheritance on non-Linux Unixes.** Outside Linux, a forked child receives a copy-on-write copy of the secret page *without* the `mlock` — an unlocked, swappable copy in a process that may not know it holds one. (On Linux the page is kernel-zeroed in the child via `MADV_WIPEONFORK`.) On macOS and the BSDs, avoid fork-based worker models while secrets are live, or construct secrets after forking.
-- Side-channel attacks (cache timing, Spectre/Meltdown-class speculation, power analysis, etc.).
-- Bytes left behind in CPU registers, vector lanes, or temporary spill slots after a `copy_from_slice`. The protection is at the memory-page level, not the microarchitectural level.
-- Hardware attackers with physical bus access, cold-boot capability, or DMA to the host.
-- Hardware/microarchitectural attacks against zeroization itself: bytes evicted into cache lines that get speculatively read out, RowHammer, and similar. The crate's wipes are language-level (volatile + fence); the silicon is not in scope.
+- Anything with your privileges or more: `ptrace`, a debugger, root. OS protection ends at the process boundary.
+- **Hibernation.** The suspend-to-disk image contains all of RAM, `mlock`'d pages included. Pair with encrypted swap or full-disk encryption.
+- **`fork()` on non-Linux Unixes** — the child gets an unlocked copy-on-write copy; construct secrets after forking there.
+- Side channels (cache timing, speculation, power analysis) and bytes left in registers or spill slots — protection is page-level, not microarchitectural.
+- Physical attackers: cold boot, DMA, RowHammer.
 
-If your threat model includes any of the items in the second list, `memsafe` is a useful layer of defense in depth but is not sufficient on its own.
+If your threat model includes the second list, memsafe is defense in depth, not sufficient on its own.
 
 ## Platform-specific notes
 
-- **`mlock` limits.** On Linux, unprivileged processes are subject to `RLIMIT_MEMLOCK` (commonly 64 KiB by default). Each `MemSafe` allocation is rounded up to a full page (typically 4 KiB), so a handful of secrets fit easily inside the default limit; allocating thousands may require raising the limit. macOS has its own per-process locked-memory caps.
-- **Page rounding.** `mmap` and `VirtualAlloc` allocate in page-sized units (typically 4 KiB). A `MemSafe<[u8; 32]>` therefore consumes a full page; the trailing bytes of the page are part of the same locked, access-controlled, zero-on-drop region.
-- **Linux-only protections.** `madvise(MADV_DONTDUMP)` is Linux-only. macOS, the BSDs, and Windows do not currently have an equivalent in this crate; on those systems, the page may still appear in process dumps. Windows core-dump exclusion is on the [Roadmap](#roadmap).
-- **Windows access model.** Windows lacks an exact `PROT_NONE` analogue in this crate's model — the lowest-privilege state is `PAGE_READONLY`. This means reads through the protected handle are *always* possible on Windows; only writes are guarded behind `write()` / `read_write()`. Unix systems use `PROT_NONE` between operations, blocking both reads and writes.
-- **Cross-platform by construction.** `libc` is pulled in only on `cfg(unix)` and `winapi` only on `cfg(windows)`; the correct backend is selected automatically — consumers never pick a platform feature flag. CI covers Linux (x86_64, aarch64, i686, armv7, ppc64le, riscv64), macOS (x86_64, aarch64), and Windows (x86_64, i686), with both default and `type-state` feature variants.
+- **`mlock` limits.** Unprivileged Linux processes get `RLIMIT_MEMLOCK` (often 64 KiB). Each allocation rounds up to a page, so a handful of secrets fit; thousands need a raised limit.
+- **Linux-only protections.** Dump exclusion and fork-wiping are Linux-only; macOS, the BSDs, and Windows have no equivalent here yet.
+- **Windows floor is `PAGE_READONLY`.** Reads through a stale pointer are always possible on Windows; only writes are guarded. Unix uses `PROT_NONE`, blocking both.
+- **No feature flags to pick.** `libc` on `cfg(unix)`, `winapi` on `cfg(windows)`; the right backend is selected automatically.
 
 ## Under the hood
 
-The implementation behind each guarantee, for readers who want the details:
-
-- **Allocation and locking.** Each instance allocates one or more pages via `mmap(NULL, len, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0)` on Unix or `VirtualAlloc(NULL, len, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE)` on Windows. The page is then pinned with `mlock` / `VirtualLock` so the kernel cannot page it out to swap. (Note: `mlock` does **not** exclude the page from a hibernation image — see the threat model.) On Linux, `madvise(MADV_DONTDUMP)` additionally tells the kernel to omit the page from any core dump produced for the process.
-
-- **Access transitions.** All access to the backing page goes through the internal `Cell` abstraction, which calls `mprotect` (Unix) or `VirtualProtect` (Windows) to elevate the page for the duration of a read or write. As soon as the temporary access guard is dropped, the page is restored to its lowest-privilege state (`PROT_NONE` on Unix, `PAGE_READONLY` on Windows). The `type-state` feature lifts this state machine into the type system.
-
-- **In-place initialization avoids a stack copy.** `Secret::<N>::new_with(|buf| ...)` allocates the protected page first, then hands the closure a `&mut [u8; N]` that points *inside* the locked region. The secret bytes are written directly into protected memory; they never live in a stack-allocated `[u8; N]` that the compiler would otherwise leave behind in the calling frame.
-
-- **Panic-safe construction.** Construction is guarded by an internal RAII rollback guard: if any setup step fails, or a caller-provided `new_with` closure panics after writing partial secret bytes, unwinding volatile-zeroes the page, unlocks it, and unmaps it before the error or panic propagates.
-
-- **Source zeroization for `Secret::from_bytes`.** After copying the source bytes into the protected page, `from_bytes` walks the source slice (everything `AsMut::as_mut` exposes) and overwrites every byte with `ptr::write_volatile(0)`, followed by a `compiler_fence(Ordering::SeqCst)`. Volatile stores are guaranteed side effects the compiler may not elide, and the fence prevents the wipe from being reordered past later code. On a memory-protection error the zeroization has already run; on a length-mismatch error the source is returned untouched so the caller can decide what to do with it.
-
-- **Drop-time zeroization is volatile and fenced.** The `Drop` implementation re-elevates the page to read/write, runs `drop_in_place` on the contents, overwrites the page byte-by-byte with `write_volatile`, emits a `compiler_fence(SeqCst)`, releases the lock with `munlock` / `VirtualUnlock`, and finally returns the page to the OS with `munmap` / `VirtualFree`. The volatile + fence guarantee is language-level — independent of whether the following syscall acts as an opaque barrier.
-
-- **Heap-pointer footgun is structurally prevented.** `Secret<N>` is a newtype over `MemSafe<[u8; N]>`. Its `new_with`, `from_bytes`, `TryFrom<&str>`, and `TryFrom<String>` constructors all produce inline byte storage; there is no way to instantiate a `Secret` whose payload lives behind an indirection.
+- **Allocate and lock.** `mmap(MAP_PRIVATE | MAP_ANONYMOUS)` / `VirtualAlloc`, pinned with `mlock` / `VirtualLock`; on Linux additionally `MADV_DONTDUMP` and `MADV_WIPEONFORK`. (`mlock` prevents swapping, not hibernation — see the threat model.)
+- **Access transitions.** Every `read()` / `write()` elevates the page with `mprotect` / `VirtualProtect` and re-seals it when the guard drops. The `type-state` feature lifts this into the type system.
+- **In-place initialization.** `new_with` hands the closure a `&mut [u8; N]` pointing inside the locked region, so the secret never exists in a stack temporary or on the heap.
+- **Panic-safe construction.** An internal rollback guard volatile-zeroes, unlocks, and unmaps the page if setup fails or the `init` closure panics.
+- **Wipes that can't be optimized out.** Source zeroization and drop-time wiping are byte-wise `write_volatile` plus `compiler_fence(SeqCst)` — a language-level guarantee, independent of the syscalls around it.
 
 ## Roadmap
 
-Planned hardening work, roughly in priority order:
-
-- **`fork()` hygiene beyond Linux.** Linux already gets `madvise(MADV_WIPEONFORK)`; add `minherit(INHERIT_ZERO)` on the BSDs where available.
-- **Closure-based access API.** Replace `read()` / `write()` guards with `read(|r| ...)` / `write(|w| ...)` closures, so the page is provably returned to its lowest-privilege state when the closure returns.
-- **Guard pages.** Allocate adjacent inaccessible pages around the protected region to turn over- and under-runs into immediate faults.
-- **Windows core-dump exclusion.** Mark protected pages so they are omitted from minidumps.
-- **In-memory encryption at rest.** Encrypt the page contents while the buffer is in its lowest-privilege state, decrypting only inside `read()` / `write()`. Defense in depth against attackers who can read the process's memory.
-- **Anti-debugging hooks.** Detect or refuse `ptrace` / debugger attachment.
-- **Side-channel mitigation.** Constant-time read/write paths to resist timing and speculative-execution attacks.
-- **Custom allocator.** Randomized placement and integrity checks to obscure memory locations.
+- **`fork()` hygiene beyond Linux.** `minherit(INHERIT_ZERO)` on the BSDs where available.
+- **Closure-based access API**, so the page provably re-seals when the closure returns.
+- **Guard pages** around the region to turn overruns into immediate faults.
+- **Windows core-dump exclusion** (minidumps).
+- **In-memory encryption at rest**, decrypting only inside `read()` / `write()`.
+- **Anti-debugging hooks**, **constant-time access paths**, **custom allocator** with randomized placement.
 
 See the [Milestones](https://github.com/po0uyan/memsafe/milestones) for live status.
 
 ## Security notice
 
-`memsafe` is designed against the threat model documented above and has not undergone a formal third-party security audit. We recommend reviewing the [Threat model](#threat-model) section against your own requirements before relying on this crate for sensitive data. Bug reports and security findings are very welcome — please open an issue or a PR.
+memsafe is designed against the threat model above and has not undergone a formal third-party security audit. Review the threat model against your own requirements before relying on it. Bug reports and security findings are very welcome.
 
 ## Contributing
 
-Issues and pull requests are welcome at [github.com/po0uyan/memsafe](https://github.com/po0uyan/memsafe) — enhancements, security fixes, and anything that pushes the crate toward the [Roadmap](#roadmap).
+Issues and pull requests are welcome at [github.com/po0uyan/memsafe](https://github.com/po0uyan/memsafe).
 
 ```shell
 cargo test                              # default features
 cargo test --features type-state       # compile-time state machine
-cargo clippy --all-targets             # lints
+cargo clippy --all-targets             # lints (includes benches)
 ```
 
 ## License
