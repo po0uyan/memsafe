@@ -89,6 +89,63 @@ fn from_bytes_length_error_does_not_zeroize_source() {
     );
 }
 
+/// `as_mut` flips between two equal-length windows of one allocation.
+/// Both are in bounds; `from_bytes` must still copy and wipe the first.
+struct SplitSource {
+    data: Vec<u8>,
+    calls: usize,
+    left: std::sync::Arc<std::sync::Mutex<Vec<u8>>>,
+}
+
+impl AsMut<[u8]> for SplitSource {
+    fn as_mut(&mut self) -> &mut [u8] {
+        let call = self.calls;
+        self.calls += 1;
+        let mid = self.data.len() / 2;
+        if call == 0 {
+            &mut self.data[..mid]
+        } else {
+            &mut self.data[mid..]
+        }
+    }
+}
+
+impl Drop for SplitSource {
+    fn drop(&mut self) {
+        if let Ok(mut left) = self.left.lock() {
+            *left = std::mem::take(&mut self.data);
+        }
+    }
+}
+
+#[test]
+fn from_bytes_copies_the_first_as_mut_slice() {
+    use std::sync::{Arc, Mutex};
+
+    let data = b"validated-sourcealternate-buffer".to_vec();
+    assert_eq!(data.len(), 32);
+
+    let left = Arc::new(Mutex::new(Vec::new()));
+    let source = SplitSource {
+        data,
+        calls: 0,
+        left: Arc::clone(&left),
+    };
+
+    let mut secret = match Secret::<32>::from_bytes(source) {
+        Ok(s) => s,
+        Err(_) => panic!("from_bytes must succeed for a fitting source"),
+    };
+
+    let view = secret.read().unwrap();
+    assert_eq!(&view[..16], b"validated-source");
+    assert!(view[16..].iter().all(|&b| b == 0));
+
+    let data = left.lock().unwrap();
+    assert_eq!(&data[..16], &[0u8; 16]);
+    assert_eq!(&data[16..], b"alternate-buffer");
+}
+
 /// The core page-sealing guarantee on Unix: once the read guard drops, the
 /// page returns to `PROT_NONE` and *any* access — even from this very
 /// process — is fatal. We verify by re-running this test binary as a child
