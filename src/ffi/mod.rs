@@ -12,7 +12,7 @@ use libc::{MADV_DONTDUMP, c_void};
 #[cfg(windows)]
 mod win;
 #[cfg(windows)]
-use winapi::um::winnt::{MEM_COMMIT, MEM_DECOMMIT, MEM_RESERVE, PAGE_READONLY, PAGE_READWRITE};
+use winapi::um::winnt::{MEM_COMMIT, MEM_RELEASE, MEM_RESERVE, PAGE_READONLY, PAGE_READWRITE};
 
 /// Allocates page-alined memory dynamically.
 ///
@@ -72,7 +72,9 @@ pub fn mem_alloc<T>(len: usize) -> Result<*mut T, MemoryError> {
 ///
 /// * `ptr` - A pointer to the memory that was previously allocated.
 /// * `len` - The size of the allocated memory in bytes. This must match the size
-///   originally passed to [`mem_alloc`](fn.mem_alloc.html).
+///   originally passed to [`mem_alloc`](fn.mem_alloc.html). Unix passes it to
+///   `munmap`. Windows ignores it, because `MEM_RELEASE` requires a size of 0
+///   and releases the whole reservation.
 ///
 /// # Returns
 ///
@@ -82,12 +84,14 @@ pub fn mem_alloc<T>(len: usize) -> Result<*mut T, MemoryError> {
 /// # Platform-specific Behavior
 ///
 /// * **Unix**: Uses `munmap` to release the memory.
-/// * **Windows**: Uses `VirtualFree` with `MEM_DECOMMIT` to deallocate the memory.
+/// * **Windows**: Uses `VirtualFree` with `MEM_RELEASE` and a size of 0, which
+///   frees the entire reservation. `MEM_DECOMMIT` only returns the pages to the
+///   reserved state, so the address space cannot be reused.
 ///
 /// # Safety
 ///
 /// * The `ptr` must be a valid, non-null pointer returned by [`mem_alloc`](fn.mem_alloc.html).
-/// * The `len` must be correct, as passing an incorrect size may cause undefined behavior.
+/// * On Unix, `len` must be correct: an over-long size can unmap neighboring mappings.
 /// * After deallocation, the pointer must not be accessed again.
 pub fn mem_dealloc<T>(ptr: *mut T, len: usize) -> Result<(), MemoryError> {
     #[cfg(unix)]
@@ -97,7 +101,12 @@ pub fn mem_dealloc<T>(ptr: *mut T, len: usize) -> Result<(), MemoryError> {
 
     #[cfg(windows)]
     {
-        win::virtual_free(ptr, len, MEM_DECOMMIT)
+        // Size must be 0. MEM_RELEASE frees the whole reservation VirtualAlloc
+        // created. MEM_DECOMMIT only decommits, leaving the pages reserved, so
+        // every dropped secret would leak one allocation-granularity block
+        // (64 KiB on the Windows targets this crate ships) until process exit.
+        let _ = len;
+        win::virtual_free(ptr, 0, MEM_RELEASE)
     }
 }
 
@@ -298,4 +307,30 @@ pub fn mem_no_dump<T>(ptr: *mut T, len: usize) -> Result<(), MemoryError> {
 #[cfg(target_os = "linux")]
 pub fn mem_wipe_on_fork<T>(ptr: *mut T, len: usize) -> Result<(), MemoryError> {
     unix::madvice(ptr as *mut c_void, len, libc::MADV_WIPEONFORK)
+}
+
+/// Drop must hand the address space back. `MEM_DECOMMIT` leaves the region
+/// reserved, so `VirtualQuery` would still report `MEM_RESERVE` here.
+#[cfg(all(windows, test))]
+mod tests {
+    use winapi::um::memoryapi::VirtualQuery;
+    use winapi::um::winnt::{MEM_FREE, MEMORY_BASIC_INFORMATION};
+
+    #[test]
+    fn drop_releases_the_reservation() {
+        let mut secret = crate::Secret::<32>::new_with(|buf| buf[0] = 0xAB).unwrap();
+        let addr = {
+            let view = secret.read().unwrap();
+            view.as_ptr() as *const winapi::ctypes::c_void
+        };
+        drop(secret);
+
+        let mut info: MEMORY_BASIC_INFORMATION = unsafe { std::mem::zeroed() };
+        let written = unsafe { VirtualQuery(addr, &mut info, std::mem::size_of_val(&info)) };
+        assert_ne!(written, 0, "VirtualQuery failed");
+        assert_eq!(
+            info.State, MEM_FREE,
+            "dropped secret must release its reservation"
+        );
+    }
 }
