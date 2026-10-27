@@ -167,9 +167,36 @@ jobs:
           cargo build --verbose --no-default-features --features type-state --target ${{ matrix.target }}
           cargo test --verbose --no-default-features --features type-state --target ${{ matrix.target }}
 
+  # FreeBSD has no hosted runner, so the tests run inside a FreeBSD VM on an
+  # Ubuntu runner. This is a real FreeBSD kernel (not qemu user-mode), so the
+  # kernel-level security tests (sealed-page faults, VM map flags) all run.
+  test-freebsd:
+    name: test (x86_64-unknown-freebsd)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Build and Test (FreeBSD VM)
+        uses: vmactions/freebsd-vm@v1
+        with:
+          release: "15.1"
+          prepare: |
+            pkg install -y curl
+            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --component clippy
+          run: |
+            . "$HOME/.cargo/env"
+            freebsd-version
+            rustc --version
+            cargo clippy --all-targets
+            cargo build --verbose
+            cargo test --verbose
+            cargo build --verbose --no-default-features --features type-state
+            cargo test --verbose --no-default-features --features type-state
+
   release:
     name: Release on successful tests and merge
-    needs: test
+    needs: [test, test-freebsd]
     if: github.event_name == 'push'  # Runs only when merged into main
     runs-on: ubuntu-latest
     # Merging several PRs in quick succession starts one release job per

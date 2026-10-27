@@ -367,13 +367,46 @@ fn kernel_reports_locked_nodump_wipeonfork_flags() {
     }
 }
 
+/// FreeBSD counterpart of the smaps check: ask the kernel for this process's
+/// VM map (`kinfo_getvmmap`) and verify the secret's entry is user-wired
+/// (`mlock`) and excluded from core dumps (`MADV_NOCORE`). Fork wiping has no
+/// FreeBSD equivalent here yet, so there is no third flag to check.
+#[cfg(target_os = "freebsd")]
+#[test]
+fn kernel_reports_wired_nocore_flags() {
+    let mut secret = Secret::<32>::new_with(|b| b.fill(1)).unwrap();
+    let view = secret.read().unwrap();
+    let addr = view.as_ptr() as usize;
+
+    let entry = vm_entry_for(addr).expect("secret page not found in the VM map");
+    for (flag, name, meaning) in [
+        (
+            libc::KVME_FLAG_USER_WIRED,
+            "USER_WIRED",
+            "mlock (never swapped)",
+        ),
+        (
+            libc::KVME_FLAG_NOCOREDUMP,
+            "NOCOREDUMP",
+            "MADV_NOCORE (excluded from core dumps)",
+        ),
+    ] {
+        assert!(
+            entry.flags & flag != 0,
+            "kernel does not report KVME_FLAG_{name} ({meaning}) on the secret page; kve_flags = {:#x}",
+            entry.flags
+        );
+    }
+}
+
 /// Watch the guard state machine through the kernel's eyes: the mapping's
-/// permission bits in /proc/self/maps must read `---p` while sealed, `r--p`
-/// under a read guard, `rw-p` under a write guard, and return to `---p`
-/// after every guard drops.
-#[cfg(target_os = "linux")]
+/// permission bits (/proc/self/maps on Linux, the process VM map on FreeBSD)
+/// must read `---` while sealed, `r--` under a read guard, `rw-` under a
+/// write guard, and return to `---` after every guard drops.
+#[cfg(any(target_os = "linux", target_os = "freebsd"))]
 #[test]
 fn kernel_reports_permission_transitions() {
+    #[cfg(target_os = "linux")]
     if emulated_kernel() {
         eprintln!("skipping: /proc maps under qemu describe the emulator, not the guest");
         return;
@@ -384,22 +417,22 @@ fn kernel_reports_permission_transitions() {
     let addr = {
         let view = secret.read().unwrap();
         let addr = view.as_ptr() as usize;
-        assert_eq!(perms_for(addr).as_deref(), Some("r--p"), "read guard open");
+        assert_eq!(perms_for(addr).as_deref(), Some("r--"), "read guard open");
         addr
     };
     assert_eq!(
         perms_for(addr).as_deref(),
-        Some("---p"),
+        Some("---"),
         "after read guard drop"
     );
 
     {
         let _w = secret.write().unwrap();
-        assert_eq!(perms_for(addr).as_deref(), Some("rw-p"), "write guard open");
+        assert_eq!(perms_for(addr).as_deref(), Some("rw-"), "write guard open");
     }
     assert_eq!(
         perms_for(addr).as_deref(),
-        Some("---p"),
+        Some("---"),
         "after write guard drop"
     );
 
@@ -412,7 +445,7 @@ fn kernel_reports_permission_transitions() {
     let _view = secret.read().unwrap();
     assert_eq!(
         perms_for(other_addr).as_deref(),
-        Some("---p"),
+        Some("---"),
         "unrelated secret must stay sealed while another is read"
     );
 }
@@ -474,7 +507,7 @@ fn vm_flags_for(smaps: &str, addr: usize) -> Option<Vec<String>> {
     None
 }
 
-/// Permission string (`r--p`, `---p`, ...) of the mapping covering `addr`.
+/// Permission string (`r--`, `---`, ...) of the mapping covering `addr`.
 #[cfg(target_os = "linux")]
 fn perms_for(addr: usize) -> Option<String> {
     let maps = std::fs::read_to_string("/proc/self/maps").ok()?;
@@ -488,10 +521,65 @@ fn perms_for(addr: usize) -> Option<String> {
                 usize::from_str_radix(end, 16),
             ) {
                 if s <= addr && addr < e {
-                    return Some(perms.to_string());
+                    // Drop the trailing private/shared marker (`p`/`s`).
+                    return Some(perms[..3].to_string());
                 }
             }
         }
     }
     None
+}
+
+/// Permission string (`r--`, `---`, ...) of the mapping covering `addr`.
+#[cfg(target_os = "freebsd")]
+fn perms_for(addr: usize) -> Option<String> {
+    let prot = vm_entry_for(addr)?.protection;
+    let bit = |mask, c| if prot & mask != 0 { c } else { '-' };
+    Some(
+        [
+            bit(libc::KVME_PROT_READ, 'r'),
+            bit(libc::KVME_PROT_WRITE, 'w'),
+            bit(libc::KVME_PROT_EXEC, 'x'),
+        ]
+        .iter()
+        .collect(),
+    )
+}
+
+/// The parts of a FreeBSD VM map entry these tests look at.
+#[cfg(target_os = "freebsd")]
+struct VmEntry {
+    flags: libc::c_int,
+    protection: libc::c_int,
+}
+
+/// Find the VM map entry covering `addr` in this process's map.
+#[cfg(target_os = "freebsd")]
+fn vm_entry_for(addr: usize) -> Option<VmEntry> {
+    let mut count: libc::c_int = 0;
+    let entries = unsafe { libc::kinfo_getvmmap(libc::getpid(), &mut count) };
+    if entries.is_null() {
+        return None;
+    }
+    // libutil returns an array of the C struct and records its size in every
+    // entry. Step by that size rather than Rust's `size_of`, which depends on
+    // the FreeBSD ABI libc was built for; the fields read here sit in the
+    // prefix every ABI shares.
+    let found = (0..count.max(0) as usize)
+        .map(|i| unsafe {
+            let stride = (*entries).kve_structsize as usize;
+            entries
+                .cast::<u8>()
+                .add(i * stride)
+                .cast::<libc::kinfo_vmentry>()
+        })
+        .find(|&e| unsafe { (*e).kve_start as usize <= addr && addr < (*e).kve_end as usize })
+        .map(|e| unsafe {
+            VmEntry {
+                flags: (*e).kve_flags,
+                protection: (*e).kve_protection,
+            }
+        });
+    unsafe { libc::free(entries.cast()) };
+    found
 }

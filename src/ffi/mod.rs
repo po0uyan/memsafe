@@ -6,8 +6,8 @@ mod unix;
 #[cfg(unix)]
 use libc::{MAP_ANONYMOUS, MAP_PRIVATE, PROT_NONE, PROT_READ, PROT_WRITE};
 
-#[cfg(target_os = "linux")]
-use libc::{MADV_DONTDUMP, c_void};
+#[cfg(any(target_os = "linux", target_os = "freebsd"))]
+use libc::c_void;
 
 #[cfg(windows)]
 mod win;
@@ -293,9 +293,16 @@ pub fn mem_unlock<T>(ptr: *mut T, len: usize) -> Result<(), MemoryError> {
     }
 }
 
-#[cfg(target_os = "linux")]
+/// Tells the kernel to leave this memory range out of core dumps:
+/// `MADV_DONTDUMP` on Linux, `MADV_NOCORE` on FreeBSD.
+#[cfg(any(target_os = "linux", target_os = "freebsd"))]
 pub fn mem_no_dump<T>(ptr: *mut T, len: usize) -> Result<(), MemoryError> {
-    unix::madvice(ptr as *mut c_void, len, MADV_DONTDUMP)
+    #[cfg(target_os = "linux")]
+    let advice = libc::MADV_DONTDUMP;
+    #[cfg(target_os = "freebsd")]
+    let advice = libc::MADV_NOCORE;
+
+    unix::madvice(ptr as *mut c_void, len, advice)
 }
 
 /// Tells the kernel to zero this memory range in any forked child.

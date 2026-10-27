@@ -64,10 +64,10 @@ pub struct Secret<const N: usize> {
 impl<const N: usize> Secret<N> {
     /// Allocate an `N`-byte secret in protected memory and fill it in place.
     ///
-    /// The page is locked, dump-excluded (Linux), and OS-zeroed **before**
-    /// `init` runs. `init` writes the secret through a `&mut [u8; N]` that
-    /// points directly into the protected region — the secret never visits
-    /// a stack temporary or the regular heap.
+    /// The page is locked, dump-excluded (Linux, FreeBSD), and OS-zeroed
+    /// **before** `init` runs. `init` writes the secret through a
+    /// `&mut [u8; N]` that points directly into the protected region — the
+    /// secret never visits a stack temporary or the regular heap.
     ///
     /// This is the most secure constructor: there is no "before" state in
     /// which the bytes existed in unprotected memory.
