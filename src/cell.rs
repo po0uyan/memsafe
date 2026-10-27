@@ -246,24 +246,24 @@ impl<const N: usize> Cell<[u8; N]> {
     /// - On length mismatch (`source.len() > N`): source is returned untouched.
     /// - On memory-protection failure: source has already been zeroed.
     pub fn from_bytes<T: AsMut<[u8]>>(mut bytes: T) -> Result<Self, (T, MemoryError)> {
-        let len = bytes.as_mut().len();
-        if len > N {
-            return Err((
-                bytes,
-                MemoryError::from(std::io::Error::new(
-                    std::io::ErrorKind::InvalidInput,
-                    "byte slice exceeds buffer size",
-                )),
-            ));
-        }
-        Self::new_with(|page| {
-            let slice = bytes.as_mut();
-            unsafe {
-                std::ptr::copy_nonoverlapping(slice.as_ptr(), page.as_mut_ptr(), len);
-            }
-            secure_zero(slice);
-        })
-        .map_err(|e| (bytes, e))
+        // `AsMut` is safe, so a later call may return a different slice.
+        // Validate, copy, and wipe this one borrow.
+        let slice = bytes.as_mut();
+        let len = slice.len();
+        let cell = if len > N {
+            Err(MemoryError::from(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "byte slice exceeds buffer size",
+            )))
+        } else {
+            Self::new_with(|page| {
+                unsafe {
+                    std::ptr::copy_nonoverlapping(slice.as_ptr(), page.as_mut_ptr(), len);
+                }
+                secure_zero(slice);
+            })
+        };
+        cell.map_err(|e| (bytes, e))
     }
 }
 
