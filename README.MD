@@ -9,9 +9,9 @@ inaccessible between uses (on Unix even your own process can't read it), never o
 heap, and volatile-wiped on drop. All behind one safe Rust type.
 
 [![Crates.io](https://img.shields.io/crates/v/memsafe.svg)](https://crates.io/crates/memsafe)
-[![docs.rs](https://img.shields.io/docsrs/memsafe)](https://docs.rs/memsafe)
-[![CI](https://github.com/po0uyan/memsafe/actions/workflows/CI-CD.yml/badge.svg)](https://github.com/po0uyan/memsafe/actions/workflows/CI-CD.yml)
 [![Downloads](https://img.shields.io/crates/d/memsafe.svg)](https://crates.io/crates/memsafe)
+[![GitHub](https://img.shields.io/badge/GitHub-po0uyan%2Fmemsafe-181717?logo=github)](https://github.com/po0uyan/memsafe)
+[![docs.rs](https://img.shields.io/badge/docs.rs-memsafe-1f425f?logo=docs.rs)](https://docs.rs/memsafe)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 🐧 **Linux** &nbsp;·&nbsp; 🍎 **macOS** &nbsp;·&nbsp; 🪟 **Windows** &nbsp;·&nbsp; ⚙️ **other Unixes**
