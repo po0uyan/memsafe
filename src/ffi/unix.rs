@@ -39,9 +39,8 @@ pub fn mlock<T>(ptr: *mut T, len: usize) -> Result<(), MemoryError> {
     }
 }
 
-/// Wrapper over `madvice`. Full documentation here:
-/// https://learn.microsoft.com/en-us/windows/win32/api/memoryapi/nf-memoryapi-virtualunlock
-#[cfg(target_os = "linux")]
+/// Wrapper over `madvise`. Full documentation with `man madvise`.
+#[cfg(any(target_os = "linux", target_os = "freebsd"))]
 pub fn madvice<T>(ptr: *mut T, len: usize, advice: i32) -> Result<(), MemoryError> {
     if unsafe { libc::madvise(ptr as *mut libc::c_void, len, advice) } != 0 {
         Err(std::io::Error::last_os_error().into())
@@ -95,8 +94,16 @@ mod tests {
 
     #[test]
     fn mprotect_error_on_unmapped_address() {
-        // The zero page is never mapped in a hosted process.
-        let result = mprotect(std::ptr::null_mut::<u8>(), PAGE, libc::PROT_READ);
+        // The zero page is never mapped in a hosted process. FreeBSD clamps
+        // the range to the lowest user address instead, leaving it empty,
+        // and an empty mprotect succeeds; use the never-mappable top page of
+        // the address space there. (Not everywhere: under qemu user-mode,
+        // as on the 32-bit cross targets, the top page can be valid.)
+        #[cfg(not(target_os = "freebsd"))]
+        let ptr = std::ptr::null_mut::<u8>();
+        #[cfg(target_os = "freebsd")]
+        let ptr = (usize::MAX & !(PAGE - 1)) as *mut u8;
+        let result = mprotect(ptr, PAGE, libc::PROT_READ);
         assert!(result.is_err());
     }
 

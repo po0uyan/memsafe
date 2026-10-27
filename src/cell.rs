@@ -3,8 +3,10 @@ use std::ops::{Deref, DerefMut};
 #[cfg(unix)]
 use crate::ffi::mem_noaccess;
 
+#[cfg(any(target_os = "linux", target_os = "freebsd"))]
+use crate::ffi::mem_no_dump;
 #[cfg(target_os = "linux")]
-use crate::ffi::{mem_no_dump, mem_wipe_on_fork};
+use crate::ffi::mem_wipe_on_fork;
 
 use crate::{
     MemoryError,
@@ -129,7 +131,7 @@ impl<T> Cell<T> {
         mem_lock(ptr, len)?;
         guard.mark_locked();
 
-        #[cfg(target_os = "linux")]
+        #[cfg(any(target_os = "linux", target_os = "freebsd"))]
         mem_no_dump(ptr, len)?;
         #[cfg(target_os = "linux")]
         mem_wipe_on_fork(ptr, len)?;
@@ -188,10 +190,11 @@ impl<T> Cell<T> {
 impl<const N: usize> Cell<[u8; N]> {
     /// Allocate a protected `N`-byte page and let `init` fill it in place.
     ///
-    /// The page is allocated, `mlock`'d, marked `MADV_DONTDUMP` (Linux), and
-    /// OS-zeroed (`mmap MAP_ANONYMOUS` / `VirtualAlloc MEM_COMMIT`) **before**
-    /// `init` runs. `init` writes the secret through `&mut [u8; N]` directly
-    /// into the protected region — no stack temporary, no allocator detour.
+    /// The page is allocated, `mlock`'d, excluded from core dumps (Linux,
+    /// FreeBSD), and OS-zeroed (`mmap MAP_ANONYMOUS` / `VirtualAlloc
+    /// MEM_COMMIT`) **before** `init` runs. `init` writes the secret through
+    /// `&mut [u8; N]` directly into the protected region — no stack
+    /// temporary, no allocator detour.
     /// After `init` returns, the page is transitioned to its lowest-privilege
     /// state (`PROT_NONE` on Unix, `PAGE_READONLY` on Windows).
     ///
@@ -217,7 +220,7 @@ impl<const N: usize> Cell<[u8; N]> {
         mem_lock(ptr, len)?;
         guard.mark_locked();
 
-        #[cfg(target_os = "linux")]
+        #[cfg(any(target_os = "linux", target_os = "freebsd"))]
         mem_no_dump(ptr, len)?;
         #[cfg(target_os = "linux")]
         mem_wipe_on_fork(ptr, len)?;
