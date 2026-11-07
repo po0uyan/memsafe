@@ -113,7 +113,7 @@ impl<T> Drop for PartialCell<T> {
 }
 
 impl<T> Cell<T> {
-    pub fn new(value: T) -> Result<Cell<T>, MemoryError> {
+    pub fn new(mut value: T) -> Result<Cell<T>, MemoryError> {
         let len = std::mem::size_of::<T>();
         if len == 0 {
             return Err(MemoryError::from(std::io::Error::new(
@@ -141,13 +141,13 @@ impl<T> Cell<T> {
         // `value` is still live, and `forget` must come last so the wiped
         // value is never dropped. `Written` is marked between copy and
         // wipe so a panic in between still wipes the page on rollback.
-        let mut value = std::mem::ManuallyDrop::new(value);
-        let val_ptr = &mut *value as *mut T;
+        let val_ptr = &mut value as *mut T;
         unsafe {
             std::ptr::copy_nonoverlapping(val_ptr as *const u8, ptr as *mut u8, len);
         }
         guard.mark_written();
         ptr_fill_zero(val_ptr);
+        std::mem::forget(value);
 
         #[cfg(windows)]
         mem_readonly(ptr, len)?;
