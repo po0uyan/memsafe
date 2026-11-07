@@ -167,9 +167,32 @@ jobs:
           cargo build --verbose --no-default-features --features type-state --target ${{ matrix.target }}
           cargo test --verbose --no-default-features --features type-state --target ${{ matrix.target }}
 
+  # The test suite cannot see UB: a move of an invalid value is a no-op at
+  # codegen and is never read back, so it compiles and passes everywhere.
+  # `Cell::new` shipped such a move for two minor versions with every job above
+  # green. Miri is the only thing that catches this class of bug.
+  miri:
+    name: Miri
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          # cargo-miri needs the rust-src component; it is not in the default profile.
+          components: miri, rust-src
+
+      - name: Run Miri (default)
+        run: cargo miri test --test miri --test secret --test gaurd --test readme
+
+      - name: Run Miri (type-state)
+        run: cargo miri test --no-default-features --features type-state --test miri --test type_state
+
   release:
     name: Release on successful tests and merge
-    needs: test
+    needs: [test, miri]
     if: github.event_name == 'push'  # Runs only when merged into main
     runs-on: ubuntu-latest
     # Merging several PRs in quick succession starts one release job per
