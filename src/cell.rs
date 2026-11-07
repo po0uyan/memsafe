@@ -134,13 +134,15 @@ impl<T> Cell<T> {
         #[cfg(target_os = "linux")]
         mem_wipe_on_fork(ptr, len)?;
 
-        // Copy `value`'s bytes into the protected page, wipe the original
-        // through the same borrow, then `forget` it. Ordering constraints:
-        // the bytes must not move through another function's stack frame
-        // (a copy there could never be wiped), the wipe must happen while
-        // `value` is still live, and `forget` must come last so the wiped
-        // value is never dropped. `Written` is marked between copy and
-        // wipe so a panic in between still wipes the page on rollback.
+        // Copy `value`'s bytes into the protected page and wipe the original
+        // through the same borrow. Ordering constraints: the bytes must not
+        // move through another function's stack frame (a copy there could
+        // never be wiped), and the wipe must happen while `value` is still
+        // live. `ManuallyDrop` then suppresses the destructor of the wiped
+        // value. It must not be `forget`-ten instead: that takes the value by
+        // value, which moves an all-zero `T` — UB for any type with a niche
+        // (`String`, `Box`, `NonZero*`, ...). `Written` is marked between copy
+        // and wipe so a panic in between still wipes the page on rollback.
         let mut value = std::mem::ManuallyDrop::new(value);
         let val_ptr = &mut *value as *mut T;
         unsafe {
