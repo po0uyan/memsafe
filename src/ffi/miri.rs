@@ -20,7 +20,13 @@ fn layout(len: usize) -> std::alloc::Layout {
     std::alloc::Layout::from_size_align(len.max(1), ALIGN).expect("valid layout")
 }
 
-pub fn mmap<T>(len: usize, _prot: i32, _flags: i32, _fd: i32, _offset: isize) -> Result<*mut T, MemoryError> {
+pub fn mmap<T>(
+    len: usize,
+    _prot: i32,
+    _flags: i32,
+    _fd: i32,
+    _offset: isize,
+) -> Result<*mut T, MemoryError> {
     let ptr = unsafe { std::alloc::alloc_zeroed(layout(len)) };
     if ptr.is_null() {
         Err(std::io::Error::from(std::io::ErrorKind::OutOfMemory).into())

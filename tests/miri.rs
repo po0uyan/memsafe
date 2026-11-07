@@ -14,7 +14,7 @@
 //! the value is never read afterwards), so the gate is `cargo miri test`. Run:
 //!
 //! ```text
-//! cargo +nightly miri test --test miri_ub
+//! cargo +nightly miri test --test miri
 //! ```
 //!
 //! `src/ffi/miri.rs` stands in for the syscall backend under `cfg(miri)`;
