@@ -37,8 +37,9 @@ pub fn mmap<T>(
 
 /// Performs the same pointer cast as `unix::mprotect`, but no permission change.
 pub fn mprotect<T>(ptr: *mut T, len: usize, _prot: i32) -> Result<(), MemoryError> {
-    // Touch the arguments so a mismatch between the allocation and the
-    // caller's length still shows up as an out-of-bounds complaint.
+    // Sanity-check the call shape only. An over-long `len` cannot be caught
+    // here: every page is a separate allocation, so there is no neighbouring
+    // mapping for an out-of-range access to land in.
     debug_assert!(!ptr.is_null() && len > 0);
     Ok(())
 }

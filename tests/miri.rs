@@ -19,6 +19,11 @@
 //!
 //! `src/ffi/miri.rs` stands in for the syscall backend under `cfg(miri)`;
 //! everything else here is the crate's real code.
+//!
+//! The tests themselves do not check `cfg(miri)`: they run in the normal
+//! `cargo test` pass too, where they pass without detecting anything. That
+//! is expected — the assertions are about values, and the UB is invisible
+//! until an interpreter looks for it.
 
 use memsafe::MemSafe;
 
