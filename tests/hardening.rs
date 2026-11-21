@@ -43,3 +43,67 @@ fn page_aligned_type_is_accepted_and_aligned() {
     });
     assert_eq!(addr % std::mem::align_of::<PageAligned>(), 0);
 }
+
+/// A value whose destructor panics.
+#[cfg(unix)]
+struct PanicOnDrop([u8; 32]);
+
+#[cfg(unix)]
+impl Drop for PanicOnDrop {
+    fn drop(&mut self) {
+        panic!("PanicOnDrop::drop");
+    }
+}
+
+#[cfg(unix)]
+const SECRET: &[u8; 32] = b"TOP-SECRET-TOP-SECRET-TOP-SECRET";
+
+/// If `T::drop` panics, the secret must still be wiped and the page
+/// released. Before the fix the panic skipped the teardown, and the page
+/// stayed mapped, writable and full of the secret after the drop.
+///
+/// The child drops the value, catches the panic, and reads the old address:
+/// it must fault (page unmapped) or at least not see the secret. It exits 42
+/// if the secret is still there.
+#[cfg(unix)]
+#[test]
+fn panicking_drop_still_wipes_and_releases_the_page() {
+    use std::panic::{AssertUnwindSafe, catch_unwind};
+
+    if std::env::var_os("MEMSAFE_PANIC_DROP_CHILD").is_some() {
+        let mut ms = MemSafe::new(PanicOnDrop(*SECRET)).unwrap();
+        let addr = { ms.read().unwrap().0.as_ptr() as usize };
+        let caught = catch_unwind(AssertUnwindSafe(|| drop(ms)));
+        assert!(caught.is_err(), "the panic must still propagate");
+        let mut seen = [0u8; 32];
+        for (i, b) in seen.iter_mut().enumerate() {
+            *b = unsafe { std::ptr::read_volatile((addr as *const u8).add(i)) };
+        }
+        std::process::exit(if &seen == SECRET { 42 } else { 0 });
+    }
+
+    let exe = std::env::current_exe().unwrap();
+    let status = std::process::Command::new(exe)
+        .args([
+            "panicking_drop_still_wipes_and_releases_the_page",
+            "--exact",
+            "--test-threads=1",
+        ])
+        .env("MEMSAFE_PANIC_DROP_CHILD", "1")
+        .stderr(std::process::Stdio::null())
+        .status()
+        .unwrap();
+
+    // Same escape hatch as tests/security.rs: under cross + qemu the test
+    // binary cannot re-exec itself.
+    if status.code() == Some(127) {
+        eprintln!("skipping: this environment cannot respawn the test binary");
+        return;
+    }
+
+    use std::os::unix::process::ExitStatusExt;
+    assert!(
+        status.signal().is_some() || status.code() == Some(0),
+        "secret must be wiped and the page released after a panicking drop, got {status:?}"
+    );
+}
