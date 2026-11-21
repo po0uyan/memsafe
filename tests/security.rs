@@ -246,6 +246,134 @@ fn sealed_page_write_is_fatal() {
     );
 }
 
+/// Child exit codes for the release tests below: the old address was still
+/// readable, and held only zeros / still held secret bytes.
+#[cfg(unix)]
+const READABLE_BUT_WIPED: i32 = 7;
+#[cfg(unix)]
+const READABLE_AND_LEAKED: i32 = 8;
+
+/// True for an x86_64 binary translated by Rosetta 2 on Apple Silicon (the
+/// `macos-latest, x86_64` CI job). Rosetta shows 4 KiB pages on 16 KiB
+/// hardware, so unmapping one does not make its address fault: a released
+/// page stays readable there, and only the wipe can be checked.
+#[cfg(target_os = "macos")]
+fn under_rosetta() -> bool {
+    let mut translated: libc::c_int = 0;
+    let mut size = std::mem::size_of::<libc::c_int>();
+    let rc = unsafe {
+        libc::sysctlbyname(
+            c"sysctl.proc_translated".as_ptr(),
+            (&mut translated as *mut libc::c_int).cast(),
+            &mut size,
+            std::ptr::null_mut(),
+            0,
+        )
+    };
+    rc == 0 && translated == 1
+}
+
+#[cfg(all(unix, not(target_os = "macos")))]
+fn under_rosetta() -> bool {
+    false
+}
+
+/// The released page must be gone: reading it faults. Under Rosetta it may
+/// stay readable, but must then hold only zeros.
+#[cfg(unix)]
+fn assert_released(status: std::process::ExitStatus, what: &str) {
+    use std::os::unix::process::ExitStatusExt;
+    // Not SIGABRT: that would mean the wipe check in `mem_unlock` failed.
+    let faulted = matches!(status.signal(), Some(libc::SIGSEGV | libc::SIGBUS));
+    let wiped_under_rosetta = under_rosetta() && status.code() == Some(READABLE_BUT_WIPED);
+    assert!(
+        faulted || wiped_under_rosetta,
+        "reading {what} must fault (exit {READABLE_BUT_WIPED}: readable but wiped, \
+         {READABLE_AND_LEAKED}: secret still there), got: {status:?}"
+    );
+}
+
+/// Re-run this test binary with `env_var` set, running only `test_name`, and
+/// report how that child ended. `None` when the binary cannot re-exec itself
+/// (cross + qemu, shell exit code 127).
+#[cfg(unix)]
+fn run_child(test_name: &str, env_var: &str) -> Option<std::process::ExitStatus> {
+    let exe = std::env::current_exe().unwrap();
+    let status = std::process::Command::new(exe)
+        .args([test_name, "--exact", "--nocapture", "--test-threads=1"])
+        .env(env_var, "1")
+        .status()
+        .unwrap();
+    if status.code() == Some(127) {
+        eprintln!("skipping: this environment cannot respawn the test binary");
+        return None;
+    }
+    Some(status)
+}
+
+/// Dropping a secret must release its page, not just wipe it: a read through
+/// a pointer kept from before the drop must kill the process. If the drop
+/// were skipped, or left the page mapped, the read would succeed.
+#[cfg(unix)]
+#[test]
+fn read_after_drop_is_fatal() {
+    if std::env::var_os("MEMSAFE_READ_AFTER_DROP_CHILD").is_some() {
+        let mut secret = Secret::<32>::new_with(|buf| buf[0] = 0xAA).unwrap();
+        let ptr_addr = {
+            let view = secret.read().unwrap();
+            view.as_ptr() as usize
+        };
+        drop(secret); // wiped, unlocked and unmapped here
+
+        let byte = unsafe { std::ptr::read_volatile(ptr_addr as *const u8) };
+        std::process::exit(if byte == 0 {
+            READABLE_BUT_WIPED
+        } else {
+            READABLE_AND_LEAKED
+        });
+    }
+
+    if let Some(status) = run_child("read_after_drop_is_fatal", "MEMSAFE_READ_AFTER_DROP_CHILD") {
+        assert_released(status, "a dropped page");
+    }
+}
+
+/// A construction that fails after `init` has written part of the secret
+/// must wipe and release the page before the panic reaches the caller. The
+/// child keeps the page's address from inside `init`, catches the panic and
+/// reads it: the page must be gone. (The wipe itself is checked by the
+/// debug assertion in `mem_unlock`, which aborts the child if it was
+/// skipped.)
+#[cfg(unix)]
+#[test]
+fn failed_construction_releases_the_page() {
+    if std::env::var_os("MEMSAFE_FAILED_INIT_CHILD").is_some() {
+        let addr = std::cell::Cell::new(0usize);
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            Secret::<32>::new_with(|buf| {
+                buf[..3].copy_from_slice(b"abc");
+                addr.set(buf.as_ptr() as usize);
+                panic!("simulated init failure");
+            })
+        }));
+        assert!(result.is_err(), "the panic must reach the caller");
+
+        let byte = unsafe { std::ptr::read_volatile(addr.get() as *const u8) };
+        std::process::exit(if byte == 0 {
+            READABLE_BUT_WIPED
+        } else {
+            READABLE_AND_LEAKED
+        });
+    }
+
+    if let Some(status) = run_child(
+        "failed_construction_releases_the_page",
+        "MEMSAFE_FAILED_INIT_CHILD",
+    ) {
+        assert_released(status, "the page of a failed construction");
+    }
+}
+
 /// A locked-memory request no machine can satisfy must surface as a clean
 /// `Err` — exercising the construction rollback path (page unmapped, nothing
 /// leaked, no panic) rather than aborting or returning a half-built secret.

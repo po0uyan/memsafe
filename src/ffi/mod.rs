@@ -282,6 +282,16 @@ pub fn mem_lock<T>(ptr: *mut T, len: usize) -> Result<(), MemoryError> {
 /// * `len` must be correct, matching the size of the locked region.
 /// * Unlocking memory that was never locked may result in undefined behavior on some platforms.
 pub fn mem_unlock<T>(ptr: *mut T, len: usize) -> Result<(), MemoryError> {
+    // A locked page may have held a secret, and it is only unlocked on its
+    // way out, after the wipe. Debug builds (tests, mutation runs) check that
+    // it really is zero, so a skipped wipe fails loudly instead of handing the
+    // secret back to the OS. Pages that were never locked are never written,
+    // and may be huge (a failed 4 TiB request), so they are not read here.
+    debug_assert!(
+        crate::ptr_ops::is_zeroed(ptr as *const u8, len),
+        "memsafe: locked page released before it was wiped"
+    );
+
     #[cfg(unix)]
     {
         unix::munlock(ptr, len)
@@ -309,28 +319,124 @@ pub fn mem_wipe_on_fork<T>(ptr: *mut T, len: usize) -> Result<(), MemoryError> {
     unix::madvice(ptr as *mut c_void, len, libc::MADV_WIPEONFORK)
 }
 
-/// Drop must hand the address space back. `MEM_DECOMMIT` leaves the region
-/// reserved, so `VirtualQuery` would still report `MEM_RESERVE` here.
-#[cfg(all(windows, test))]
+/// What the Windows kernel reports for a secret's memory. Like the Linux /proc
+/// tests, these ask the OS rather than trust the crate. (Two `cfg`s rather
+/// than `cfg(all(windows, test))`: cargo-mutants only skips test code it can
+/// see is `cfg(test)`, and would otherwise mutate these helpers.)
+#[cfg(test)]
+#[cfg(windows)]
 mod tests {
+    use std::sync::{Mutex, MutexGuard};
+    use winapi::ctypes::c_void;
     use winapi::um::memoryapi::VirtualQuery;
-    use winapi::um::winnt::{MEM_FREE, MEMORY_BASIC_INFORMATION};
+    use winapi::um::processthreadsapi::GetCurrentProcess;
+    use winapi::um::psapi::{PSAPI_WORKING_SET_EX_INFORMATION, QueryWorkingSetEx};
+    use winapi::um::winnt::{MEM_FREE, MEMORY_BASIC_INFORMATION, PAGE_READONLY, PAGE_READWRITE};
 
-    #[test]
-    fn drop_releases_the_reservation() {
-        let mut secret = crate::Secret::<32>::new_with(|buf| buf[0] = 0xAB).unwrap();
-        let addr = {
-            let view = secret.read().unwrap();
-            view.as_ptr() as *const winapi::ctypes::c_void
-        };
-        drop(secret);
+    /// Windows can hand a just-released reservation to the next allocation
+    /// at once, so a test that checks a freed address must not run while
+    /// another test allocates. Every test here holds this lock.
+    static SERIAL: Mutex<()> = Mutex::new(());
 
+    fn serial() -> MutexGuard<'static, ()> {
+        SERIAL
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    fn query(addr: *const c_void) -> MEMORY_BASIC_INFORMATION {
         let mut info: MEMORY_BASIC_INFORMATION = unsafe { std::mem::zeroed() };
         let written = unsafe { VirtualQuery(addr, &mut info, std::mem::size_of_val(&info)) };
         assert_ne!(written, 0, "VirtualQuery failed");
+        info
+    }
+
+    /// Drop must hand the address space back. `MEM_DECOMMIT` leaves the region
+    /// reserved, so `VirtualQuery` would still report `MEM_RESERVE` here.
+    #[test]
+    fn drop_releases_the_reservation() {
+        let _serial = serial();
+        let mut secret = crate::Secret::<32>::new_with(|buf| buf[0] = 0xAB).unwrap();
+        let addr = {
+            let view = secret.read().unwrap();
+            view.as_ptr() as *const c_void
+        };
+        drop(secret);
+
         assert_eq!(
-            info.State, MEM_FREE,
+            query(addr).State,
+            MEM_FREE,
             "dropped secret must release its reservation"
+        );
+    }
+
+    /// A construction that fails after `init` has written to the page must
+    /// release the reservation too, on the rollback path.
+    #[test]
+    fn failed_construction_releases_the_reservation() {
+        let _serial = serial();
+        let addr = std::cell::Cell::new(std::ptr::null());
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            crate::Secret::<32>::new_with(|buf| {
+                buf[0] = 0xAB;
+                addr.set(buf.as_ptr() as *const c_void);
+                panic!("simulated init failure");
+            })
+        }));
+        assert!(result.is_err(), "the panic must reach the caller");
+
+        assert_eq!(
+            query(addr.get()).State,
+            MEM_FREE,
+            "a failed construction must release its reservation"
+        );
+    }
+
+    /// The seal as the kernel sees it: read-only at rest (the lowest state
+    /// Windows allows here), read-write only under a write guard, and
+    /// read-only again once that guard drops.
+    #[test]
+    fn kernel_reports_protection_transitions() {
+        let _serial = serial();
+        let mut secret = crate::Secret::<32>::new_with(|buf| buf[0] = 1).unwrap();
+        let addr = {
+            let view = secret.read().unwrap();
+            view.as_ptr() as *const c_void
+        };
+        assert_eq!(query(addr).Protect, PAGE_READONLY, "sealed at rest");
+        {
+            let _writer = secret.write().unwrap();
+            assert_eq!(query(addr).Protect, PAGE_READWRITE, "write guard open");
+        }
+        assert_eq!(
+            query(addr).Protect,
+            PAGE_READONLY,
+            "sealed again after the write guard"
+        );
+    }
+
+    /// The page must be locked in RAM (`VirtualLock`), as the kernel sees it.
+    #[test]
+    fn kernel_reports_the_page_locked() {
+        let _serial = serial();
+        let mut secret = crate::Secret::<32>::new_with(|buf| buf[0] = 1).unwrap();
+        let view = secret.read().unwrap();
+
+        let mut info: PSAPI_WORKING_SET_EX_INFORMATION = unsafe { std::mem::zeroed() };
+        info.VirtualAddress = view.as_ptr() as *mut c_void;
+        let ok = unsafe {
+            QueryWorkingSetEx(
+                GetCurrentProcess(),
+                (&mut info as *mut PSAPI_WORKING_SET_EX_INFORMATION).cast(),
+                std::mem::size_of_val(&info) as u32,
+            )
+        };
+        assert_ne!(ok, 0, "QueryWorkingSetEx failed");
+        assert_eq!(info.VirtualAttributes.Valid(), 1, "page must be resident");
+        assert_eq!(
+            info.VirtualAttributes.Locked(),
+            1,
+            "page must be locked in RAM"
         );
     }
 }

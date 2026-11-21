@@ -221,6 +221,22 @@ cargo test --features type-state
 cargo clippy --all-targets
 ```
 
+### 🧬 Mutation testing
+
+Passing tests aren't enough for a security library: they also have to fail when a protection is
+removed. [cargo-mutants](https://mutants.rs) checks that by breaking the code on purpose, such as
+deleting a wipe or skipping an `mlock`, and making sure some test fails.
+
+```shell
+cargo install cargo-mutants
+cargo mutants                                                      # every mutant
+git diff origin/main > pr.diff && cargo mutants --in-diff pr.diff  # only your changes
+```
+
+CI runs every mutant on each pull request, natively on Linux, macOS and Windows. If a mutant survives, add a test that catches it. If it really can't be
+caught on one OS (usually code that only builds for another OS), list it in
+`ci/mutants/expected-<os>.txt` with the reason.
+
 ## License
 
 MIT. See [LICENSE](LICENSE).

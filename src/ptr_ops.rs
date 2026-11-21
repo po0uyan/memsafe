@@ -34,6 +34,15 @@ pub fn secure_zero(slice: &mut [u8]) {
     compiler_fence(Ordering::SeqCst);
 }
 
+/// True if all `len` bytes at `ptr` are zero.
+///
+/// Used before a protected page is released, to check that it really was
+/// wiped. Volatile reads, so the check looks at memory and not at what the
+/// optimizer believes was written there.
+pub fn is_zeroed(ptr: *const u8, len: usize) -> bool {
+    (0..len).all(|i| unsafe { std::ptr::read_volatile(ptr.add(i)) } == 0)
+}
+
 pub fn ptr_deref<'a, T>(ptr: *const T) -> &'a T {
     unsafe { &*ptr }
 }
@@ -44,4 +53,19 @@ pub fn ptr_deref_mut<'a, T>(ptr: *mut T) -> &'a mut T {
 
 pub fn ptr_drop_in_place<T>(ptr: *mut T) {
     unsafe { ptr.drop_in_place() };
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn is_zeroed_spots_a_single_nonzero_byte() {
+        let mut buf = [0u8; 64];
+        assert!(is_zeroed(buf.as_ptr(), buf.len()));
+        buf[63] = 1;
+        assert!(!is_zeroed(buf.as_ptr(), buf.len()));
+        secure_zero(&mut buf);
+        assert!(is_zeroed(buf.as_ptr(), buf.len()));
+    }
 }

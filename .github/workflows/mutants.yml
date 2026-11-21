@@ -1,0 +1,117 @@
+# Mutation testing. cargo-mutants breaks the code on purpose (replaces a
+# function body, flips an operator) and checks that some test fails. A mutant
+# that survives marks behaviour no test pins down, such as a wipe or an mlock
+# that could be deleted without CI noticing.
+#
+# Every PR runs every mutant: the crate is small enough that this takes about
+# as long as the regular CI, and it also catches a PR that only weakens a test.
+#
+# Guarantees and tests differ per OS, and cargo-mutants can't evaluate `cfg`:
+# code that only builds on another OS always "survives". So it runs natively
+# on each OS, and ci/mutants/check.py compares the survivors with that OS's
+# list of accepted ones (ci/mutants/expected-<os>.txt, each with a reason).
+name: Mutation testing
+
+on:
+  # No `paths` filter: the survivor checks can then be required on main, and
+  # a PR that changes no code passes them quickly instead of never reporting.
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mutants-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # Skip the mutation runs for a PR that changes no code or tests.
+  scope:
+    runs-on: ubuntu-latest
+    outputs:
+      run: ${{ steps.scope.outputs.run }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: scope
+        run: |
+          run=true
+          if [ "${{ github.event_name }}" = pull_request ]; then
+            git diff --name-only "origin/${{ github.base_ref }}...HEAD" |
+              grep -qE '^(src/|tests/|Cargo\.toml$|\.cargo/mutants\.toml$|ci/mutants/|\.github/workflows/mutants\.yml$)' ||
+              run=false
+          fi
+          echo "run=$run" >> "$GITHUB_OUTPUT"
+
+  mutants:
+    needs: scope
+    if: needs.scope.outputs.run == 'true'
+    name: mutants (${{ matrix.os }}, shard ${{ matrix.shard }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        shard: [0, 1, 2, 3]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-mutants@27.1.0
+      - name: Run cargo-mutants, shard ${{ matrix.shard }}/4
+        shell: bash
+        run: |
+          # 0: all caught, 2: some survived, 3: some hung (the tests noticed).
+          # The check job judges the survivors; any other code is a real failure.
+          cargo mutants --in-place --no-shuffle -vV --shard ${{ matrix.shard }}/4 || code=$?
+          case "${code:-0}" in 0|2|3) ;; *) exit "$code" ;; esac
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: mutants-${{ runner.os }}-${{ matrix.shard }}
+          path: mutants.out
+
+  # One verdict per OS, over all of its shards. Always runs, so it can be a
+  # required check: it fails if any cargo-mutants run failed or was cancelled.
+  check:
+    needs: [scope, mutants]
+    if: always() && needs.scope.result == 'success'
+    name: survivors (${{ matrix.os }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: Linux, list: expected-linux.txt }
+          - { os: macOS, list: expected-macos.txt }
+          - { os: Windows, list: expected-windows.txt }
+    steps:
+      - if: needs.mutants.result == 'failure' || needs.mutants.result == 'cancelled'
+        run: |
+          echo "::error::a cargo-mutants run did not finish; see the mutants jobs"
+          exit 1
+      - if: needs.mutants.result == 'skipped'
+        run: echo "No code changed, nothing to mutate." >> "$GITHUB_STEP_SUMMARY"
+      - if: needs.mutants.result == 'success'
+        uses: actions/checkout@v4
+      - if: needs.mutants.result == 'success'
+        uses: actions/download-artifact@v4
+        with:
+          pattern: mutants-${{ matrix.os }}-*
+          path: results
+      - if: needs.mutants.result == 'success'
+        name: Compare survivors with ci/mutants/${{ matrix.list }}
+        run: |
+          status=0
+          python3 ci/mutants/check.py --full ci/mutants/${{ matrix.list }} results/*/ > report.txt || status=$?
+          cat report.txt  # on stdout, so ::error:: / ::warning:: lines become annotations
+          { echo "### ${{ matrix.os }}: surviving mutants"; echo '```'; cat report.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          exit $status

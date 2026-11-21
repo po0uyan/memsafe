@@ -1,0 +1,19 @@
+# Survivors accepted on Linux, each with the reason it cannot be caught here.
+# One cargo-mutants name per line; line:column is ignored.
+
+# Windows-only code: src/ffi/win.rs and the Windows branch of mem_alloc do
+# not build here, so their mutants change nothing.
+src/ffi/mod.rs: replace | with & in mem_alloc
+src/ffi/win.rs: replace virtual_alloc -> Result<*mut T, MemoryError> with Ok(Default::default())
+src/ffi/win.rs: replace virtual_free -> Result<(), MemoryError> with Ok(())
+src/ffi/win.rs: replace == with != in virtual_free
+src/ffi/win.rs: replace virtual_protect -> Result<(), MemoryError> with Ok(())
+src/ffi/win.rs: replace == with != in virtual_protect
+src/ffi/win.rs: replace virtual_lock -> Result<(), MemoryError> with Ok(())
+src/ffi/win.rs: replace == with != in virtual_lock
+src/ffi/win.rs: replace virtual_unlock -> Result<(), MemoryError> with Ok(())
+src/ffi/win.rs: replace == with != in virtual_unlock
+
+# Linux ignores the fd of an anonymous mapping, so -1 -> 1 changes nothing.
+# (macOS rejects that fd, and catches this mutant.)
+src/ffi/mod.rs: delete - in mem_alloc
