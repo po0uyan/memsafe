@@ -84,3 +84,30 @@ mod write_guard_tests {
         assert_eq!(writer[3], 42);
     }
 }
+
+#[cfg(test)]
+mod drop_tests {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    /// `MemSafe<T>` must run `T`'s destructor exactly once: never skipping
+    /// it (the value's own resources leak) and never twice (use after free).
+    #[test]
+    fn drop_runs_the_value_destructor_exactly_once() {
+        static DROPS: AtomicUsize = AtomicUsize::new(0);
+        struct Counted(#[allow(dead_code)] u8);
+        impl Drop for Counted {
+            fn drop(&mut self) {
+                DROPS.fetch_add(1, Ordering::SeqCst);
+            }
+        }
+
+        let mem_safe = memsafe::MemSafe::new(Counted(7)).unwrap();
+        assert_eq!(
+            DROPS.load(Ordering::SeqCst),
+            0,
+            "moving the value in must not drop it"
+        );
+        drop(mem_safe);
+        assert_eq!(DROPS.load(Ordering::SeqCst), 1);
+    }
+}

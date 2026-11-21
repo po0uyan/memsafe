@@ -29,6 +29,10 @@ winapi = { version = "0.3", features = ["memoryapi", "winnt"] }
 [dev-dependencies]
 criterion = "0.5"
 
+# The Windows kernel-state tests in src/ffi: VirtualLock's lock bit.
+[target.'cfg(windows)'.dev-dependencies]
+winapi = { version = "0.3", features = ["processthreadsapi", "psapi"] }
+
 [[bench]]
 name = "memsafe_bench"
 harness = false

@@ -1,0 +1,41 @@
+# Survivors accepted on Windows, each with the reason it cannot be caught here.
+# One cargo-mutants name per line; line:column is ignored.
+
+# Unix-only code: src/ffi/unix.rs and the cfg(unix) / Linux-only parts of
+# src/ffi/mod.rs, src/cell.rs and src/type_state.rs do not build on Windows.
+src/cell.rs: replace Cell<T>::no_access -> Result<(), MemoryError> with Ok(())
+src/ffi/mod.rs: delete - in mem_alloc
+src/ffi/mod.rs: replace mem_no_dump -> Result<(), MemoryError> with Ok(())
+src/ffi/mod.rs: replace mem_noaccess -> Result<(), MemoryError> with Ok(())
+src/ffi/mod.rs: replace mem_wipe_on_fork -> Result<(), MemoryError> with Ok(())
+src/ffi/mod.rs: replace | with & in mem_alloc
+src/ffi/mod.rs: replace | with & in mem_alloc
+src/ffi/mod.rs: replace | with & in mem_readwrite
+src/ffi/unix.rs: replace != with == in madvice
+src/ffi/unix.rs: replace != with == in mlock
+src/ffi/unix.rs: replace != with == in mprotect
+src/ffi/unix.rs: replace != with == in munlock
+src/ffi/unix.rs: replace != with == in munmap
+src/ffi/unix.rs: replace == with != in mmap
+src/ffi/unix.rs: replace madvice -> Result<(), MemoryError> with Ok(())
+src/ffi/unix.rs: replace mlock -> Result<(), MemoryError> with Ok(())
+src/ffi/unix.rs: replace mmap -> Result<*mut T, MemoryError> with Ok(Default::default())
+src/ffi/unix.rs: replace mprotect -> Result<(), MemoryError> with Ok(())
+src/ffi/unix.rs: replace munlock -> Result<(), MemoryError> with Ok(())
+src/ffi/unix.rs: replace munmap -> Result<(), MemoryError> with Ok(())
+src/type_state.rs: replace MemSafe<T, NoAccess>::no_access -> Result<Self, Infallible> with Ok(Default::default())
+src/type_state.rs: replace MemSafe<T, NoAccess>::read_only -> Result<MemSafe<T, ReadOnly>, MemoryError> with Ok(Default::default())
+src/type_state.rs: replace MemSafe<T, NoAccess>::read_write -> Result<MemSafe<T, ReadWrite>, MemoryError> with Ok(Default::default())
+src/type_state.rs: replace MemSafe<T, ReadOnly>::no_access -> Result<MemSafe<T, NoAccess>, MemoryError> with Ok(Default::default())
+src/type_state.rs: replace MemSafe<T, ReadWrite>::no_access -> Result<MemSafe<T, NoAccess>, MemoryError> with Ok(Default::default())
+
+# A read guard never raises the page above read-only on Windows, so
+# skipping its re-seal changes nothing.
+src/mem_safe.rs: replace <impl Drop for MemSafeRead<'_, T>>::drop with ()
+
+# These run right before the reservation is released, which also drops the
+# lock: skipping VirtualUnlock changes nothing, and the results of
+# VirtualUnlock and VirtualFree are ignored on that path.
+src/ffi/win.rs: replace == with != in virtual_free
+src/ffi/win.rs: replace == with != in virtual_unlock
+src/ffi/win.rs: replace virtual_unlock -> Result<(), MemoryError> with Ok(())

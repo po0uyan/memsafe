@@ -1,0 +1,25 @@
+# Mutation testing with cargo-mutants (https://mutants.rs): it breaks the code
+# on purpose and checks that some test fails. See "Mutation testing" in
+# README.MD for how to run it and what to do when a mutant survives.
+
+# Test both APIs: the default `MemSafe` and the `type-state` one.
+all_features = true
+
+# Not shipped code: the benchmarks and examples have no tests of their own,
+# and the Miri syscall stand-in only builds under `cfg(miri)`.
+exclude_globs = ["benches/**", "examples/**", "src/ffi/miri.rs"]
+
+# Mutants no test can ever catch, on any OS. Survivors that depend on the OS
+# are listed in ci/mutants/expected-<os>.txt instead.
+exclude_re = [
+    # The flags OR-ed together here are distinct single bits, so `^` gives
+    # the same value as `|`.
+    'replace \| with \^ in mem_(alloc|readwrite)',
+    # `mem_unlock` only runs right before the page is unmapped, and unmapping
+    # releases the lock anyway.
+    'replace mem_unlock -> Result<\(\), MemoryError> with Ok\(\(\)\)',
+]
+
+# The security tests spawn child processes and wait for them to crash, so
+# allow more headroom than the default before calling a mutant a hang.
+timeout_multiplier = 3.0
