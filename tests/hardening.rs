@@ -107,3 +107,48 @@ fn panicking_drop_still_wipes_and_releases_the_page() {
         "secret must be wiped and the page released after a panicking drop, got {status:?}"
     );
 }
+
+/// If a guard cannot re-seal the page on drop, the process must abort.
+/// Before, `low_priv().unwrap()` panicked, which a caller could catch and
+/// carry on with the secret still readable.
+///
+/// The child makes the re-seal fail by unmapping the page under a live read
+/// guard (the `mprotect` in the guard's drop then fails with ENOMEM).
+#[cfg(unix)]
+#[test]
+fn failed_reseal_aborts_instead_of_panicking() {
+    if std::env::var_os("MEMSAFE_RESEAL_CHILD").is_some() {
+        let mut ms = MemSafe::new([1u8; 32]).unwrap();
+        let guard = ms.read().unwrap();
+        let page = guard.as_ptr() as *mut libc::c_void;
+        let page_size = unsafe { libc::sysconf(libc::_SC_PAGESIZE) } as usize;
+        assert_eq!(unsafe { libc::munmap(page, page_size) }, 0);
+        let survived = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| drop(guard)));
+        // Reaching this line means the failure was a catchable panic.
+        std::process::exit(if survived.is_err() { 3 } else { 4 });
+    }
+
+    let exe = std::env::current_exe().unwrap();
+    let status = std::process::Command::new(exe)
+        .args([
+            "failed_reseal_aborts_instead_of_panicking",
+            "--exact",
+            "--test-threads=1",
+        ])
+        .env("MEMSAFE_RESEAL_CHILD", "1")
+        .stderr(std::process::Stdio::null())
+        .status()
+        .unwrap();
+
+    if status.code() == Some(127) {
+        eprintln!("skipping: this environment cannot respawn the test binary");
+        return;
+    }
+
+    use std::os::unix::process::ExitStatusExt;
+    assert_eq!(
+        status.signal(),
+        Some(libc::SIGABRT),
+        "a failed re-seal must abort the process, got {status:?}"
+    );
+}
