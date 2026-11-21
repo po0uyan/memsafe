@@ -1,5 +1,10 @@
 //! Regression tests for `MemSafe<T>` edge cases that used to break the
 //! crate's guarantees: over-aligned types and panicking destructors.
+//!
+//! Unix-only: on Windows, building the over-aligned test values on the stack
+//! crashed the test binary (STATUS_ACCESS_VIOLATION) before reaching the
+//! code under test, and the drop/re-seal tests already need Unix signals.
+#![cfg(unix)]
 
 use memsafe::MemSafe;
 
