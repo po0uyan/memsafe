@@ -121,6 +121,15 @@ impl<T> Cell<T> {
                 "zero-sized values cannot be placed in protected memory",
             )));
         }
+        // `mem_alloc` only guarantees page alignment. A more strictly
+        // aligned `T` would sit at a misaligned address, and every `&T`
+        // handed out by the guards would be UB.
+        if std::mem::align_of::<T>() > crate::ffi::alloc_alignment() {
+            return Err(MemoryError::from(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "type alignment exceeds the page alignment of protected memory",
+            )));
+        }
         let ptr = mem_alloc(len)?;
         // From here on the page is owned by `guard`. Any `?` failure or
         // panic will roll back through `PartialCell::drop`.

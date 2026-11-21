@@ -56,6 +56,10 @@ impl<T> MemSafe<T> {
     /// # Errors
     ///
     /// Returns a `MemoryError` if memory protection could not be initialized.
+    /// Returns a `MemoryError` of kind [`std::io::ErrorKind::InvalidInput`]
+    /// if `T` is zero-sized, or if `align_of::<T>()` exceeds the alignment
+    /// of a protected page (the page size on Unix, the allocation
+    /// granularity on Windows).
     ///
     /// # Examples
     ///

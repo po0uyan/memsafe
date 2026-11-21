@@ -14,6 +14,31 @@ mod win;
 #[cfg(windows)]
 use winapi::um::winnt::{MEM_COMMIT, MEM_RELEASE, MEM_RESERVE, PAGE_READONLY, PAGE_READWRITE};
 
+/// The alignment every pointer returned by [`mem_alloc`] is guaranteed to
+/// have: the page size for `mmap`, the allocation granularity for
+/// `VirtualAlloc`.
+///
+/// A `T` with a larger alignment cannot be stored: the page would only be
+/// page-aligned, so every reference to the value would be misaligned (UB).
+pub fn alloc_alignment() -> usize {
+    #[cfg(unix)]
+    {
+        // SAFETY: `sysconf` has no memory-safety preconditions.
+        let page = unsafe { libc::sysconf(libc::_SC_PAGESIZE) };
+        // POSIX guarantees at least 4096 when the query fails.
+        if page > 0 { page as usize } else { 4096 }
+    }
+
+    #[cfg(windows)]
+    {
+        // SAFETY: `GetSystemInfo` only writes into the struct it is given,
+        // and an all-zero `SYSTEM_INFO` is a valid value of that type.
+        let mut info: winapi::um::sysinfoapi::SYSTEM_INFO = unsafe { std::mem::zeroed() };
+        unsafe { winapi::um::sysinfoapi::GetSystemInfo(&mut info) };
+        info.dwAllocationGranularity as usize
+    }
+}
+
 /// Allocates page-alined memory dynamically.
 ///
 /// This function provides a cross-platform abstraction for memory allocation,

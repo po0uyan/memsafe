@@ -22,7 +22,7 @@ type-state = []
 libc = { version = "0.2" }
 
 [target.'cfg(windows)'.dependencies]
-winapi = { version = "0.3", features = ["memoryapi", "winnt"] }
+winapi = { version = "0.3", features = ["memoryapi", "sysinfoapi", "winnt"] }
 
 [dependencies]
 
