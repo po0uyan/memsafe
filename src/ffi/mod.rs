@@ -1,6 +1,14 @@
 use crate::MemoryError;
 
-#[cfg(unix)]
+// Under Miri the real backend's syscalls are uninterpreted, so every call
+// aborts before this crate's code is checked. `miri` stands in for it so the
+// value handling above the FFI layer can still be examined for UB.
+#[cfg(all(unix, miri))]
+mod miri;
+#[cfg(all(unix, miri))]
+use miri as unix;
+
+#[cfg(all(unix, not(miri)))]
 mod unix;
 
 #[cfg(unix)]
