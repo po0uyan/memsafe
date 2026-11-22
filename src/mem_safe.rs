@@ -123,10 +123,18 @@ impl<T> Deref for MemSafeRead<'_, T> {
 /// Fail secure by aborting. Panicking instead, as before, aborts anyway if
 /// a panic is already unwinding, and otherwise lets `catch_unwind` carry on
 /// with an unsealed secret.
+///
+/// Nothing on this path may panic, so the message is written with
+/// `writeln!` and its result ignored: `eprintln!` panics when stderr is
+/// unwritable (e.g. a closed pipe), which would skip the abort.
 #[cold]
 #[inline(never)]
 fn reseal_failed(err: &MemoryError) -> ! {
-    eprintln!("memsafe: could not re-seal protected memory ({err}); aborting");
+    use std::io::Write;
+    let _ = writeln!(
+        std::io::stderr(),
+        "memsafe: could not re-seal protected memory ({err}); aborting"
+    );
     std::process::abort()
 }
 

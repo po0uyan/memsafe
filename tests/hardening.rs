@@ -113,24 +113,37 @@ fn panicking_drop_still_wipes_and_releases_the_page() {
     );
 }
 
+/// Child side of the re-seal tests. Unmaps the page under a live read guard,
+/// so the `mprotect` in the guard's drop fails with ENOMEM, then drops the
+/// guard inside `catch_unwind`. Returning at all means the failure was a
+/// catchable panic: the child then exits 3, with the secret unsealed.
+fn reseal_failure_child() -> ! {
+    let mut ms = MemSafe::new([1u8; 32]).unwrap();
+    let guard = ms.read().unwrap();
+    let page = guard.as_ptr() as *mut libc::c_void;
+    let page_size = unsafe { libc::sysconf(libc::_SC_PAGESIZE) } as usize;
+    assert_eq!(unsafe { libc::munmap(page, page_size) }, 0);
+    let survived = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| drop(guard)));
+    std::process::exit(if survived.is_err() { 3 } else { 4 });
+}
+
+/// Asserts the re-seal child was killed by SIGABRT.
+fn assert_aborted(status: std::process::ExitStatus) {
+    use std::os::unix::process::ExitStatusExt;
+    assert_eq!(
+        status.signal(),
+        Some(libc::SIGABRT),
+        "a failed re-seal must abort the process, got {status:?}"
+    );
+}
+
 /// If a guard cannot re-seal the page on drop, the process must abort.
 /// Before, `low_priv().unwrap()` panicked, which a caller could catch and
 /// carry on with the secret still readable.
-///
-/// The child makes the re-seal fail by unmapping the page under a live read
-/// guard (the `mprotect` in the guard's drop then fails with ENOMEM).
-#[cfg(unix)]
 #[test]
 fn failed_reseal_aborts_instead_of_panicking() {
     if std::env::var_os("MEMSAFE_RESEAL_CHILD").is_some() {
-        let mut ms = MemSafe::new([1u8; 32]).unwrap();
-        let guard = ms.read().unwrap();
-        let page = guard.as_ptr() as *mut libc::c_void;
-        let page_size = unsafe { libc::sysconf(libc::_SC_PAGESIZE) } as usize;
-        assert_eq!(unsafe { libc::munmap(page, page_size) }, 0);
-        let survived = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| drop(guard)));
-        // Reaching this line means the failure was a catchable panic.
-        std::process::exit(if survived.is_err() { 3 } else { 4 });
+        reseal_failure_child();
     }
 
     let exe = std::env::current_exe().unwrap();
@@ -149,11 +162,59 @@ fn failed_reseal_aborts_instead_of_panicking() {
         eprintln!("skipping: this environment cannot respawn the test binary");
         return;
     }
+    assert_aborted(status);
+}
 
-    use std::os::unix::process::ExitStatusExt;
-    assert_eq!(
-        status.signal(),
-        Some(libc::SIGABRT),
-        "a failed re-seal must abort the process, got {status:?}"
+/// The abort must not depend on stderr being writable. `eprintln!` panics
+/// when stderr is a closed pipe (EPIPE; Rust ignores SIGPIPE), and that
+/// panic used to happen before the abort, so `catch_unwind` carried on
+/// with the page unsealed.
+///
+/// The child's stderr is a pipe whose read end the parent closes at once.
+/// `--nocapture` makes the test harness write `eprintln!` output to the real
+/// stderr instead of its capture buffer, as it would in a normal program.
+#[test]
+fn failed_reseal_aborts_even_when_stderr_is_a_closed_pipe() {
+    if std::env::var_os("MEMSAFE_RESEAL_EPIPE_CHILD").is_some() {
+        // Wait until the parent has closed the read end.
+        use std::io::Write;
+        let broken = (0..500).any(|_| match std::io::stderr().write(b".") {
+            Err(e) if e.kind() == std::io::ErrorKind::BrokenPipe => true,
+            _ => {
+                std::thread::sleep(std::time::Duration::from_millis(10));
+                false
+            }
+        });
+        if !broken {
+            std::process::exit(5);
+        }
+        reseal_failure_child();
+    }
+
+    let exe = std::env::current_exe().unwrap();
+    let mut child = std::process::Command::new(exe)
+        .args([
+            "failed_reseal_aborts_even_when_stderr_is_a_closed_pipe",
+            "--exact",
+            "--nocapture",
+            "--test-threads=1",
+        ])
+        .env("MEMSAFE_RESEAL_EPIPE_CHILD", "1")
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    drop(child.stderr.take());
+    let status = child.wait().unwrap();
+
+    if status.code() == Some(127) {
+        eprintln!("skipping: this environment cannot respawn the test binary");
+        return;
+    }
+    assert_ne!(
+        status.code(),
+        Some(5),
+        "child never saw a broken stderr pipe"
     );
+    assert_aborted(status);
 }
