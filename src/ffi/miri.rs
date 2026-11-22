@@ -57,7 +57,22 @@ pub fn madvice<T>(_ptr: *mut T, _len: usize, _advice: i32) -> Result<(), MemoryE
     Ok(())
 }
 
+/// Releases the page, after checking it was wiped.
+///
+/// The crate must zero every page before handing it back. The real `munmap`
+/// cannot check that, but this stand-in can, so a missing or skipped wipe
+/// fails the Miri run instead of passing silently. Pages released before a
+/// value was written are still zero from `alloc_zeroed`.
 pub fn munmap<T>(ptr: *mut T, len: usize) -> Result<(), MemoryError> {
+    let page = unsafe { std::slice::from_raw_parts(ptr as *const u8, len) };
+    if let Some(offset) = page.iter().position(|&b| b != 0) {
+        use std::io::Write;
+        let _ = writeln!(
+            std::io::stderr(),
+            "memsafe (miri): page released unwiped, first non-zero byte at offset {offset}"
+        );
+        std::process::abort();
+    }
     unsafe { std::alloc::dealloc(ptr as *mut u8, layout(len)) };
     Ok(())
 }
