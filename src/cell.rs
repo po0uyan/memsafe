@@ -113,7 +113,7 @@ impl<T> Drop for PartialCell<T> {
 }
 
 impl<T> Cell<T> {
-    pub fn new(value: T) -> Result<Cell<T>, MemoryError> {
+    pub fn new(mut value: T) -> Result<Cell<T>, MemoryError> {
         let len = std::mem::size_of::<T>();
         if len == 0 {
             return Err(MemoryError::from(std::io::Error::new(
@@ -134,21 +134,27 @@ impl<T> Cell<T> {
         #[cfg(target_os = "linux")]
         mem_wipe_on_fork(ptr, len)?;
 
-        // Copy `value`'s bytes into the protected page and wipe the original
-        // through the same borrow. Ordering constraints: the bytes must not
-        // move through another function's stack frame (a copy there could
-        // never be wiped), and the wipe must happen while `value` is still
-        // live. `ManuallyDrop` then suppresses the destructor of the wiped
-        // value. It must not be `forget`-ten instead: that takes the value by
-        // value, which moves an all-zero `T` — UB for any type with a niche
-        // (`String`, `Box`, `NonZero*`, ...). `Written` is marked between copy
-        // and wipe so a panic in between still wipes the page on rollback.
-        let mut value = std::mem::ManuallyDrop::new(value);
-        let val_ptr = &mut *value as *mut T;
+        // Copy `value`'s bytes into the protected page, `forget` it, then
+        // wipe its original slot through a raw pointer taken up front.
+        //
+        // - The bytes must not be copied anywhere first: a copy in another
+        //   stack slot could never be wiped. Rebinding `value` (e.g. in
+        //   `ManuallyDrop`) makes exactly such a copy.
+        // - `forget` must come *before* the wipe. It takes `value` by value,
+        //   so after the wipe it would move an all-zero `T`: UB for any type
+        //   with a niche (`String`, `Box`, `NonZero*`, ...). Before the wipe
+        //   it moves a valid `T` and only suppresses its destructor.
+        // - The wipe then writes to the moved-from slot, which is still
+        //   allocated, and nothing reads it as a `T` afterwards.
+        //
+        // `Written` is marked right after the copy so a panic from here on
+        // still wipes the page on rollback.
+        let val_ptr = &mut value as *mut T;
         unsafe {
             std::ptr::copy_nonoverlapping(val_ptr as *const u8, ptr as *mut u8, len);
         }
         guard.mark_written();
+        std::mem::forget(value);
         ptr_fill_zero(val_ptr);
 
         #[cfg(windows)]
