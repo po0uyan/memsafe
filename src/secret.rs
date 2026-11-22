@@ -107,7 +107,8 @@ impl<const N: usize> Secret<N> {
 
     /// Obtain temporary read access to the secret bytes. The returned guard
     /// derefs to `&[u8; N]` and restores lowest-privilege access on drop
-    /// (Unix).
+    /// (Unix). If that access cannot be restored, the process aborts rather
+    /// than continue with the secret readable.
     ///
     /// **Timing note:** comparing secret bytes with `==` is not
     /// constant-time and can leak information through timing side channels.
@@ -117,7 +118,10 @@ impl<const N: usize> Secret<N> {
         self.inner.read()
     }
 
-    /// Obtain temporary read-write access to the secret bytes.
+    /// Obtain temporary read-write access to the secret bytes. The returned
+    /// guard restores lowest-privilege access on drop. If that access cannot
+    /// be restored, the process aborts rather than continue with the secret
+    /// readable or writable.
     pub fn write(&mut self) -> Result<MemSafeWrite<'_, [u8; N]>, MemoryError> {
         self.inner.write()
     }
