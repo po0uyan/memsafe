@@ -56,6 +56,10 @@ impl<T> MemSafe<T> {
     /// # Errors
     ///
     /// Returns a `MemoryError` if memory protection could not be initialized.
+    /// Returns a `MemoryError` of kind [`std::io::ErrorKind::InvalidInput`]
+    /// if `T` is zero-sized, or if `align_of::<T>()` exceeds the alignment
+    /// of a protected page (the page size on Unix, the allocation
+    /// granularity on Windows).
     ///
     /// # Examples
     ///
@@ -73,7 +77,9 @@ impl<T> MemSafe<T> {
     /// Obtains read-only access to the protected memory region. This method temporarily
     /// elevates the read privileges and returns a handle that implements `Deref` for
     /// accessing the inner value. When the returned `MemSafeRead` is dropped,
-    /// privileges are automatically revoked on Unix-based OSes.
+    /// privileges are automatically revoked on Unix-based OSes. If they
+    /// cannot be revoked, the process aborts rather than continue with the
+    /// page unsealed.
     ///
     /// # Errors
     ///
@@ -87,7 +93,8 @@ impl<T> MemSafe<T> {
     /// elevates the read and write privileges and returns a handle that implements `Deref`
     /// and `DerefMut`for modifying the inner value. When the returned `MemSafeWrite` is
     /// dropped, privileges are automatically revoked on Unix-based OSes. On Windows read,
-    /// privileges are maintained while write privileges are revoked.
+    /// privileges are maintained while write privileges are revoked. If they cannot be
+    /// revoked, the process aborts rather than continue with the page unsealed.
     ///
     /// # Errors
     ///
@@ -110,9 +117,32 @@ impl<T> Deref for MemSafeRead<'_, T> {
     }
 }
 
+/// Called when a guard cannot re-seal the page on drop, leaving the secret
+/// readable (and, after a write guard, writable).
+///
+/// Fail secure by aborting. Panicking instead, as before, aborts anyway if
+/// a panic is already unwinding, and otherwise lets `catch_unwind` carry on
+/// with an unsealed secret.
+///
+/// Nothing on this path may panic, so the message is written with
+/// `writeln!` and its result ignored: `eprintln!` panics when stderr is
+/// unwritable (e.g. a closed pipe), which would skip the abort.
+#[cold]
+#[inline(never)]
+fn reseal_failed(err: &MemoryError) -> ! {
+    use std::io::Write;
+    let _ = writeln!(
+        std::io::stderr(),
+        "memsafe: could not re-seal protected memory ({err}); aborting"
+    );
+    std::process::abort()
+}
+
 impl<T> Drop for MemSafeRead<'_, T> {
     fn drop(&mut self) {
-        self.mem_safe.cell.low_priv().unwrap();
+        if let Err(err) = self.mem_safe.cell.low_priv() {
+            reseal_failed(&err);
+        }
     }
 }
 
@@ -136,6 +166,8 @@ impl<T> DerefMut for MemSafeWrite<'_, T> {
 
 impl<T> Drop for MemSafeWrite<'_, T> {
     fn drop(&mut self) {
-        self.mem_safe.cell.low_priv().unwrap();
+        if let Err(err) = self.mem_safe.cell.low_priv() {
+            reseal_failed(&err);
+        }
     }
 }

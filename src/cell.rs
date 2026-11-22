@@ -87,6 +87,14 @@ impl<T> PartialCell<T> {
 
 impl<T> Drop for PartialCell<T> {
     fn drop(&mut self) {
+        // Declared first so it runs last, and still runs if `T::drop`
+        // below panics. Only `munlock` what was locked. The mapping always
+        // exists: `Allocated` is the entry condition for a `PartialCell`.
+        let _release = ReleaseOnExit {
+            ptr: self.ptr,
+            len: self.len,
+            locked: matches!(self.state, PartialState::Locked | PartialState::Written),
+        };
         // If a `T` has been written into the page, drop it and zero the
         // bytes before unmapping. The page is RW at this point in the
         // construction sequence (we haven't yet called the final mprotect
@@ -95,19 +103,40 @@ impl<T> Drop for PartialCell<T> {
         // in a non-RW state.
         if self.state == PartialState::Written {
             let _ = mem_readwrite(self.ptr, self.len);
+            // Zeroes the page when this block ends, even by unwinding.
+            let _wipe = WipeOnExit(self.ptr);
             // `*self.ptr` holds a valid `T` written by `Cell::new`'s
             // byte copy or `Cell::new_with`'s `init` closure. The page
             // is RW (or has just been re-set RW above).
             ptr_drop_in_place(self.ptr);
-            ptr_fill_zero(self.ptr);
         }
-        // Only `munlock` if we successfully locked — `munlock` on
-        // never-locked memory is documented as UB on some platforms.
-        if matches!(self.state, PartialState::Locked | PartialState::Written) {
+    }
+}
+
+/// Zeroes `*ptr` when dropped, so the wipe also happens when a panicking
+/// `T::drop` unwinds through the code that owns this guard.
+struct WipeOnExit<T>(*mut T);
+
+impl<T> Drop for WipeOnExit<T> {
+    fn drop(&mut self) {
+        ptr_fill_zero(self.0);
+    }
+}
+
+/// Unlocks (if `locked`) and unmaps the page when dropped, so the page is
+/// released even when a panicking `T::drop` unwinds past the normal path.
+/// Best-effort, like the rest of the teardown: drop must not panic.
+struct ReleaseOnExit<T> {
+    ptr: *mut T,
+    len: usize,
+    locked: bool,
+}
+
+impl<T> Drop for ReleaseOnExit<T> {
+    fn drop(&mut self) {
+        if self.locked {
             let _ = mem_unlock(self.ptr, self.len);
         }
-        // The mapping always exists in this state — `Allocated` is the
-        // entry condition for constructing a `PartialCell`.
         let _ = mem_dealloc(self.ptr, self.len);
     }
 }
@@ -119,6 +148,15 @@ impl<T> Cell<T> {
             return Err(MemoryError::from(std::io::Error::new(
                 std::io::ErrorKind::InvalidInput,
                 "zero-sized values cannot be placed in protected memory",
+            )));
+        }
+        // `mem_alloc` only guarantees page alignment. A more strictly
+        // aligned `T` would sit at a misaligned address, and every `&T`
+        // handed out by the guards would be UB.
+        if std::mem::align_of::<T>() > crate::ffi::alloc_alignment() {
+            return Err(MemoryError::from(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "type alignment exceeds the page alignment of protected memory",
             )));
         }
         let ptr = mem_alloc(len)?;
@@ -292,9 +330,15 @@ impl<T> Drop for Cell<T> {
         if mem_readwrite(self.ptr, len).is_err() {
             return;
         }
+        // Teardown runs from guards so a panicking `T::drop` cannot skip it
+        // and leave the secret mapped, writable and unwiped. Guards drop in
+        // reverse order: wipe first, then unlock and unmap.
+        let _release = ReleaseOnExit {
+            ptr: self.ptr,
+            len,
+            locked: true,
+        };
+        let _wipe = WipeOnExit(self.ptr);
         ptr_drop_in_place(self.ptr);
-        ptr_fill_zero(self.ptr);
-        let _ = mem_unlock(self.ptr, len);
-        let _ = mem_dealloc(self.ptr, len);
     }
 }

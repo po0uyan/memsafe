@@ -14,6 +14,31 @@ mod win;
 #[cfg(windows)]
 use winapi::um::winnt::{MEM_COMMIT, MEM_RELEASE, MEM_RESERVE, PAGE_READONLY, PAGE_READWRITE};
 
+/// The alignment every pointer returned by [`mem_alloc`] is guaranteed to
+/// have: the page size for `mmap`, the allocation granularity for
+/// `VirtualAlloc`.
+///
+/// A `T` with a larger alignment cannot be stored: the page would only be
+/// page-aligned, so every reference to the value would be misaligned (UB).
+pub fn alloc_alignment() -> usize {
+    #[cfg(unix)]
+    {
+        // SAFETY: `sysconf` has no memory-safety preconditions.
+        let page = unsafe { libc::sysconf(libc::_SC_PAGESIZE) };
+        // POSIX guarantees at least 4096 when the query fails.
+        if page > 0 { page as usize } else { 4096 }
+    }
+
+    #[cfg(windows)]
+    {
+        // SAFETY: `GetSystemInfo` only writes into the struct it is given,
+        // and an all-zero `SYSTEM_INFO` is a valid value of that type.
+        let mut info: winapi::um::sysinfoapi::SYSTEM_INFO = unsafe { std::mem::zeroed() };
+        unsafe { winapi::um::sysinfoapi::GetSystemInfo(&mut info) };
+        info.dwAllocationGranularity as usize
+    }
+}
+
 /// Allocates page-alined memory dynamically.
 ///
 /// This function provides a cross-platform abstraction for memory allocation,
@@ -307,6 +332,45 @@ pub fn mem_no_dump<T>(ptr: *mut T, len: usize) -> Result<(), MemoryError> {
 #[cfg(target_os = "linux")]
 pub fn mem_wipe_on_fork<T>(ptr: *mut T, len: usize) -> Result<(), MemoryError> {
     unix::madvice(ptr as *mut c_void, len, libc::MADV_WIPEONFORK)
+}
+
+/// `alloc_alignment` decides which `T` may be stored, so check it on every
+/// platform, including Windows, where the integration tests that exercise it
+/// end to end (`tests/hardening.rs`) do not run.
+#[cfg(test)]
+mod alignment_tests {
+    use super::{alloc_alignment, mem_alloc, mem_dealloc};
+
+    #[test]
+    fn alloc_alignment_is_a_power_of_two_of_at_least_one_page() {
+        let align = alloc_alignment();
+        assert!(align.is_power_of_two(), "{align} is not a power of two");
+        assert!(align >= 4096, "{align} is smaller than any page size");
+    }
+
+    /// `VirtualAlloc` hands out 64 KiB-aligned regions on every Windows
+    /// version and architecture.
+    #[cfg(windows)]
+    #[test]
+    fn alloc_alignment_is_the_allocation_granularity_on_windows() {
+        assert_eq!(alloc_alignment(), 65536);
+    }
+
+    /// The promise `alloc_alignment` makes is about real allocations: check
+    /// that `mem_alloc` keeps it.
+    #[test]
+    fn mem_alloc_returns_pointers_aligned_to_alloc_alignment() {
+        let align = alloc_alignment();
+        for len in [1, 4096, 65536 + 1] {
+            let ptr: *mut u8 = mem_alloc(len).unwrap();
+            assert_eq!(
+                ptr as usize % align,
+                0,
+                "len {len}: {ptr:p} not {align}-aligned"
+            );
+            mem_dealloc(ptr, len).unwrap();
+        }
+    }
 }
 
 /// Drop must hand the address space back. `MEM_DECOMMIT` leaves the region
