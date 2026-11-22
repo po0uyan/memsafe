@@ -174,13 +174,21 @@ jobs:
   miri:
     name: Miri
     runs-on: ubuntu-latest
+    # `release` waits on this job, so a hung interpreter must not block it
+    # forever. Both suites take a few minutes; `type_state`'s 1024-thread
+    # test is the slow part.
+    timeout-minutes: 30
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
       - name: Set up Rust
-        uses: dtolnay/rust-toolchain@nightly
+        uses: dtolnay/rust-toolchain@master
         with:
+          # Pinned: a nightly without Miri, or with a Miri regression, must not
+          # break CI or block a release. Bump deliberately; check the date
+          # ships `miri` at https://rust-lang.github.io/rustup-components-history/
+          toolchain: nightly-2026-11-15
           # cargo-miri needs the rust-src component; it is not in the default profile.
           components: miri, rust-src
 
