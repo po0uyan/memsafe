@@ -334,6 +334,45 @@ pub fn mem_wipe_on_fork<T>(ptr: *mut T, len: usize) -> Result<(), MemoryError> {
     unix::madvice(ptr as *mut c_void, len, libc::MADV_WIPEONFORK)
 }
 
+/// `alloc_alignment` decides which `T` may be stored, so check it on every
+/// platform, including Windows, where the integration tests that exercise it
+/// end to end (`tests/hardening.rs`) do not run.
+#[cfg(test)]
+mod alignment_tests {
+    use super::{alloc_alignment, mem_alloc, mem_dealloc};
+
+    #[test]
+    fn alloc_alignment_is_a_power_of_two_of_at_least_one_page() {
+        let align = alloc_alignment();
+        assert!(align.is_power_of_two(), "{align} is not a power of two");
+        assert!(align >= 4096, "{align} is smaller than any page size");
+    }
+
+    /// `VirtualAlloc` hands out 64 KiB-aligned regions on every Windows
+    /// version and architecture.
+    #[cfg(windows)]
+    #[test]
+    fn alloc_alignment_is_the_allocation_granularity_on_windows() {
+        assert_eq!(alloc_alignment(), 65536);
+    }
+
+    /// The promise `alloc_alignment` makes is about real allocations: check
+    /// that `mem_alloc` keeps it.
+    #[test]
+    fn mem_alloc_returns_pointers_aligned_to_alloc_alignment() {
+        let align = alloc_alignment();
+        for len in [1, 4096, 65536 + 1] {
+            let ptr: *mut u8 = mem_alloc(len).unwrap();
+            assert_eq!(
+                ptr as usize % align,
+                0,
+                "len {len}: {ptr:p} not {align}-aligned"
+            );
+            mem_dealloc(ptr, len).unwrap();
+        }
+    }
+}
+
 /// Drop must hand the address space back. `MEM_DECOMMIT` leaves the region
 /// reserved, so `VirtualQuery` would still report `MEM_RESERVE` here.
 #[cfg(all(windows, test))]
